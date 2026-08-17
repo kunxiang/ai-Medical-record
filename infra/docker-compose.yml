@@ -1,0 +1,29 @@
+# spec m0-00 §3:开发/CI 环境。PG16 + MinIO(versioning + object lock + KMS)。
+services:
+  postgres:
+    image: mirror.gcr.io/library/postgres:16-alpine   # 沙箱网络策略拉不到 docker.io,生产可换回
+    network_mode: host          # 沙箱环境无 bridge;生产可改回端口映射
+    environment:
+      POSTGRES_USER: amr
+      POSTGRES_PASSWORD: amr
+      POSTGRES_DB: amr
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U amr"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  minio:
+    image: mirror.gcr.io/minio/minio:latest
+    command: server /data --console-address ":9101"
+    environment:
+      MINIO_ROOT_USER: amr-admin
+      MINIO_ROOT_PASSWORD: amr-admin-secret
+      # 桶默认 SSE 需要 KMS(spec m0-04 §1 / 审核 #001 B17)
+      MINIO_KMS_SECRET_KEY: amr-kms-key:c2VjcmV0LWtleS1mb3ItbTAtYWNjZXB0YW5jZS0wMDE=
+    network_mode: host
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 2s
+      timeout: 2s
+      retries: 30

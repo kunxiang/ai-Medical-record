@@ -1,0 +1,21 @@
+{
+  "name": "ai-medical-record",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "build": "pnpm -r --filter './packages/**' --filter './apps/api' --filter './tools' run build",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "db:migrate": "pnpm --filter @amr/api run db:migrate",
+    "m0:acceptance": "bash infra/run-m0.sh",
+    "ci:deps": "pnpm --filter @amr/tools run ci:deps"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  }
+}

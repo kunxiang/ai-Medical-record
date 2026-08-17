@@ -1,0 +1,27 @@
+import { z } from 'zod';
+
+// spec m0-01 §2 —— 唯一定义源:DB CHECK 与 API 文档由此生成
+export const SexAtBirth = z.enum(['male', 'female', 'unknown']);
+export const RelationToOwner = z.enum(['self', 'spouse', 'parent', 'child', 'sibling', 'other']);
+export const IdentifierType = z.enum(['patient_id', 'card_no', 'medical_record_no', 'other']);
+export const IdentifierScope = z.enum(['long_term', 'single_visit']);
+export const AccessRole = z.enum(['owner', 'editor', 'viewer']);
+export const DocumentSource = z.enum(['camera', 'album', 'pdf', 'screenshot', 'scan', 'import']);
+export const DocumentStatus = z.enum([
+  'uploading', 'uploaded', 'needs_person_confirm', 'ready', 'failed',
+]);
+export const EncounterType = z.enum(['outpatient', 'inpatient', 'emergency', 'checkup', 'other']);
+// 匹配规则:精确小写;带参数或大小写变体 → 422 unsupported_media_type
+export const MimeType = z.enum(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']);
+export const DocType = z.enum([
+  'lab_report', 'imaging_report', 'prescription', 'discharge_summary',
+  'pathology', 'outpatient_note', 'checkup_report', 'ecg',
+  'vaccination', 'infusion_order', 'other', 'unknown',
+]);
+
+export const MIME_TO_EXT = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'application/pdf': 'pdf',
+} as const satisfies Record<z.infer<typeof MimeType>, string>;

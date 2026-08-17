@@ -1,0 +1,32 @@
+{
+  "name": "@amr/tools",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "echo 'tools: no unit tests (integration via m0:acceptance)'",
+    "provision-bucket": "tsx src/provision-bucket.ts",
+    "seed-account": "tsx src/seed-account.ts",
+    "gen-meta": "tsx src/gen-meta.ts",
+    "rebuild-index": "tsx src/rebuild-index.ts",
+    "verify-rebuild": "tsx src/verify-rebuild.ts",
+    "m0:acceptance": "tsx src/m0-acceptance.ts",
+    "ci:deps": "tsx src/ci-deps.ts"
+  },
+  "dependencies": {
+    "@amr/contracts": "workspace:*",
+    "@amr/storage": "workspace:*",
+    "@aws-sdk/client-s3": "^3.750.0",
+    "@node-rs/argon2": "^2.0.2",
+    "postgres": "^3.4.5",
+    "uuidv7": "^1.0.2",
+    "zod": "^3.24.1",
+    "zod-to-json-schema": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
