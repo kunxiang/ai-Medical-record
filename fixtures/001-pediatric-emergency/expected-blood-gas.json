@@ -1,0 +1,50 @@
+{
+  "_comment": "脱敏回归基准。姓名/编号/人员均已替换,数值与参考区间为原始值。",
+  "schema_version": "1.0",
+  "document": {
+    "panel_name": "血气分析7",
+    "doc_type": "lab_report",
+    "report_no": "9260817xxxx4",
+    "accession_no": "5",
+    "facility_name": "某市儿童医院(某院区)",
+    "department": "内科急诊",
+    "ordering_doctor": "医师甲",
+    "clinical_diagnosis": "呕吐查因",
+    "specimen": "whole_blood",
+    "specimen_label": "静脉血",
+    "page_count": 1,
+    "collected_at": "2026-08-17T17:07:00+08:00",
+    "received_at": "2026-08-17T17:07:00+08:00",
+    "tested_at": "2026-08-17T17:07:00+08:00",
+    "verified_at": "2026-08-17T17:17:00+08:00",
+    "sampled_on": "2026-08-17",
+    "reported_on": "2026-08-17"
+  },
+  "patient": {
+    "name": "测试患儿A",
+    "sex": "male",
+    "age_text": "3岁0月",
+    "identifiers": [{ "type": "patient_id", "value": "MASKED-001" }]
+  },
+  "observations": [
+    { "no": 1,  "local_name": "PH(校正)",          "concept_code": "PH",        "qualifier": "corrected", "value_raw": "7.394",  "value_num": 7.394,  "unit_raw": null,    "ref_low": 7.35, "ref_high": 7.45, "abnormal_flag": null, "device": "血气iSTAT1-300G", "result_kind": "calculated" },
+    { "no": 2,  "local_name": "体温(T)",            "concept_code": "BODY_TEMP", "qualifier": null,        "value_raw": "37.5",   "value_num": 37.5,   "unit_raw": "℃",     "ref_low": null, "ref_high": null, "abnormal_flag": null, "device": "血气iSTAT1-300G", "result_kind": "input_parameter" },
+    { "no": 3,  "local_name": "PH",                  "concept_code": "PH",        "qualifier": null,        "value_raw": "7.40",   "value_num": 7.40,   "unit_raw": null,    "ref_low": 7.35, "ref_high": 7.45, "abnormal_flag": null, "device": "血气iSTAT1-300G", "result_kind": "measured" },
+    { "no": 4,  "local_name": "氧分压",              "concept_code": "PO2",       "qualifier": null,        "value_raw": "65.00",  "value_num": 65.00,  "unit_raw": "mmHg",  "ref_low": 83,   "ref_high": 108,  "abnormal_flag": "L",  "device": "血气iSTAT1-300G", "result_kind": "measured" },
+    { "no": 5,  "local_name": "氧分压(校正)",      "concept_code": "PO2",       "qualifier": "corrected", "value_raw": "67.00",  "value_num": 67.00,  "unit_raw": "mmHg",  "ref_low": 80,   "ref_high": 100,  "abnormal_flag": "L",  "device": "血气iSTAT1-300G", "result_kind": "calculated" },
+    { "no": 6,  "local_name": "二氧化碳分压",        "concept_code": "PCO2",      "qualifier": null,        "value_raw": "31.40",  "value_num": 31.40,  "unit_raw": "mmHg",  "ref_low": 32,   "ref_high": 48,   "abnormal_flag": "L",  "device": "血气iSTAT1-300G", "result_kind": "measured" },
+    { "no": 7,  "local_name": "二氧化碳分压(校正)","concept_code": "PCO2",      "qualifier": "corrected", "value_raw": "32.10",  "value_num": 32.10,  "unit_raw": "mmHg",  "ref_low": 35,   "ref_high": 45,   "abnormal_flag": "L",  "device": "血气iSTAT1-300G", "result_kind": "calculated" },
+    { "no": 8,  "local_name": "吸氧浓度",            "concept_code": "FIO2",      "qualifier": null,        "value_raw": "21.00",  "value_num": 21.00,  "unit_raw": "%",     "ref_low": null, "ref_high": null, "abnormal_flag": null, "device": "血气iSTAT1-300G", "result_kind": "input_parameter" },
+    { "no": 9,  "local_name": "钙离子",              "concept_code": "CA_ION",    "qualifier": null,        "value_raw": "1.23",   "value_num": 1.23,   "unit_raw": "mmol/L","ref_low": 1.15, "ref_high": 1.33, "abnormal_flag": null, "device": "血气iSTAT1-300G", "result_kind": "measured" },
+    { "no": 10, "local_name": "钠离子",              "concept_code": "NA",        "qualifier": null,        "value_raw": "137.00", "value_num": 137.00, "unit_raw": "mmol/L","ref_low": 136,  "ref_high": 145,  "abnormal_flag": null, "device": "血气iSTAT1-300G", "result_kind": "measured" },
+    { "no": 11, "local_name": "钾离子",              "concept_code": "K",         "qualifier": null,        "value_raw": "4.00",   "value_num": 4.00,   "unit_raw": "mmol/L","ref_low": 3.5,  "ref_high": 5.5,  "abnormal_flag": null, "device": "血气iSTAT1-300G", "result_kind": "measured" },
+    { "no": 12, "local_name": "血红蛋白",            "concept_code": "HGB",       "qualifier": null,        "value_raw": "12.60",  "value_num": 12.60,  "unit_raw": "g/dL",  "ref_low": 12,   "ref_high": 17,   "abnormal_flag": null, "device": "血气iSTAT1-300G", "result_kind": "calculated",
+      "_note": "★ 参考区间 12-17 g/dL 是成人范围,患儿 3 岁。且该值由 HCT×0.34 推算,非实测。" },
+    { "no": 13, "local_name": "氧饱和度",            "concept_code": "SO2",       "qualifier": null,        "value_raw": "93",     "value_num": 93,     "unit_raw": "%",     "ref_low": 94,   "ref_high": 98,   "abnormal_flag": "L",  "device": "血气iSTAT1-300G", "result_kind": "calculated" },
+    { "no": 14, "local_name": "红细胞比容计算值",    "concept_code": "HCT",       "qualifier": null,        "value_raw": "37",     "value_num": 37,     "unit_raw": null,    "ref_low": null, "ref_high": null, "abnormal_flag": null, "device": "血气iSTAT1-300G", "result_kind": "calculated" },
+    { "no": 15, "local_name": "细胞外液碱剩余",      "concept_code": "BE_ECF",    "qualifier": null,        "value_raw": "-5",     "value_num": -5,     "unit_raw": "mmol/L","ref_low": null, "ref_high": null, "abnormal_flag": null, "device": "血气iSTAT1-300G", "result_kind": "calculated",
+      "_note": "负号易被 OCR 丢失" },
+    { "no": 16, "local_name": "血清碳酸氢盐(HCO3)","concept_code": "HCO3",      "qualifier": null,        "value_raw": "19.5",   "value_num": 19.5,   "unit_raw": "mmol/L","ref_low": 22,   "ref_high": 26,   "abnormal_flag": "L",  "device": "血气iSTAT1-300G", "result_kind": "calculated" },
+    { "no": 17, "local_name": "二氧化碳总量(TCO2)","concept_code": "TCO2",      "qualifier": null,        "value_raw": "20",     "value_num": 20,     "unit_raw": "mmol/L","ref_low": null, "ref_high": null, "abnormal_flag": null, "device": "血气iSTAT1-300G", "result_kind": "calculated" }
+  ]
+}

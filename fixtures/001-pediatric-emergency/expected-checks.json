@@ -1,0 +1,86 @@
+{
+  "_comment": "自洽校验的期望结果。全部 passed=true;skipped 的规则不得报错。",
+  "schema_version": "1.0",
+  "checks": [
+    {
+      "rule": "wbc_differential_sum",
+      "passed": true,
+      "computed": 100.0, "expected": 100, "tolerance_pct": 2,
+      "inputs": { "NEUT_PCT": 70.3, "LYMPH_PCT": 22.4, "MONO_PCT": 6.1, "EO_PCT": 1.2, "BASO_PCT": 0.0 }
+    },
+    {
+      "rule": "wbc_absolute_sum",
+      "passed": true,
+      "computed": 7.02, "expected": 7.02, "tolerance_pct": 3,
+      "inputs": { "NEUT_ABS": 4.94, "LYMPH_ABS": 1.57, "MONO_ABS": 0.43, "EO_ABS": 0.08, "BASO_ABS": 0.00, "WBC": 7.02 }
+    },
+    {
+      "rule": "wbc_absolute_consistency",
+      "passed": true, "tolerance_pct": 10,
+      "detail": [
+        { "item": "NEUT",  "computed": 4.935, "reported": 4.94 },
+        { "item": "LYMPH", "computed": 1.572, "reported": 1.57 },
+        { "item": "MONO",  "computed": 0.428, "reported": 0.43 },
+        { "item": "EO",    "computed": 0.084, "reported": 0.08 }
+      ]
+    },
+    {
+      "rule": "rbc_indices",
+      "passed": true, "tolerance_pct": 3,
+      "detail": [
+        { "item": "MCV",  "unit": "fL",  "formula": "HCT(%)/RBC(10^12/L)*10", "computed": 73.69, "reported": 73.7 },
+        { "item": "MCH",  "unit": "pg",  "formula": "Hb(g/L)/RBC(10^12/L)",   "computed": 25.15, "reported": 25.2 },
+        { "item": "MCHC", "unit": "g/L", "formula": "Hb(g/L)/HCT(%)*100",     "computed": 341.2, "reported": 341 }
+      ]
+    },
+    {
+      "rule": "platelet_crit",
+      "passed": true,
+      "formula": "PLT*MPV/10000", "computed": 0.321, "reported": 0.32, "tolerance_pct": 5
+    },
+    {
+      "rule": "henderson_hasselbalch",
+      "passed": true,
+      "formula": "6.1 + log10(HCO3/(0.0301*pCO2))",
+      "inputs": { "HCO3": 19.5, "PCO2_corrected": 32.1 },
+      "computed": 7.405, "reported": 7.394, "delta": 0.011, "tolerance_abs": 0.05
+    },
+    {
+      "rule": "tco2_identity",
+      "passed": true,
+      "formula": "HCO3 + 0.03*pCO2", "computed": 20.46, "reported": 20, "tolerance_pct": 5,
+      "note": "报告取整为 20"
+    },
+    {
+      "rule": "istat_hb_hct",
+      "passed": true,
+      "formula": "HCT*0.34", "computed": 12.58, "reported": 12.60, "tolerance_pct": 3,
+      "implication": "命中即说明该 Hb 为计算值 → result_kind = calculated"
+    },
+    {
+      "rule": "cross_device_agreement",
+      "passed": true, "tolerance_pct": 10,
+      "detail": [
+        { "concept": "HGB", "iSTAT": 126, "BC-7500-2": 130, "unit": "g/L", "diff_pct": 3.1 },
+        { "concept": "HCT", "iSTAT": 37,  "BC-7500-2": 38.1, "unit": "%",  "diff_pct": 2.9 }
+      ],
+      "note": "属正常方法学差异。此规则的主要价值是抓单位换算错误(如 126 vs 1300)。"
+    }
+  ],
+  "skipped": [
+    { "rule": "anion_gap",        "reason": "missing_input", "missing": ["CL"], "note": "血气单无氯离子 —— 必须静默跳过,不得报错" },
+    { "rule": "lipid_panel_sum",  "reason": "missing_input", "missing": ["TC", "LDL_C", "HDL_C", "TG"] },
+    { "rule": "protein_sum",      "reason": "missing_input", "missing": ["TP", "ALB"] },
+    { "rule": "egfr_creatinine",  "reason": "missing_input", "missing": ["CREA"] }
+  ],
+  "reference_range_conflicts": [
+    {
+      "concept": "HGB",
+      "sources": [
+        { "device": "血气iSTAT1-300G", "ref_low": 120, "ref_high": 170, "unit": "g/L", "note": "成人范围(原报告 12-17 g/dL)" },
+        { "device": "BC-7500-2",       "ref_low": 112, "ref_high": 149, "unit": "g/L", "note": "儿科范围" }
+      ],
+      "expected_behavior": "中性提示区间不一致;不得自行'纠正',不得判定哪个正确"
+    }
+  ]
+}

@@ -142,12 +142,30 @@ PK `(account_id, person_id)`
 | `captured_at` | timestamptz | 拍摄时间(EXIF 优先,否则上传时间) |
 | `sampled_on` | date nullable | **采样日期** —— 做趋势用这个 |
 | `reported_on` | date nullable | **报告日期** |
+| `collected_at` | timestamptz nullable | **采集时刻**(精确到分)—— 见下方说明 |
+| `received_at` / `tested_at` / `verified_at` | timestamptz nullable | 接收 / 检验 / 审核时间 |
 | `facility_id` | uuid FK nullable | 冗余自 encounter,便于直接筛选 |
+| `report_no` | text nullable | **报告编号** —— 见下方说明 |
+| `accession_no` | text nullable | 流水号 |
+| `panel_name` | text nullable | 报告标题,如 `血气分析7`、`血常规(五分类)+超敏CRP` |
+| `ordering_doctor` | text nullable | 申请医师 |
+| `clinical_diagnosis` | text nullable | **报告上直接印的临床诊断** —— 见下方说明 |
+| `performed_by` / `verified_by_name` | text nullable | 检验者 / 审核者 |
 | `uploaded_by` | uuid FK account | |
 | `status` | enum(`uploading`,`uploaded`,`needs_person_confirm`,`ready`,`failed`) | |
 | `created_at` | timestamptz | |
 
 > **三个日期必须分开存。** 采样日期 / 报告日期 / 就诊日期经常差好几天。做趋势用采样日期,找档案时人记得的往往是就诊日期。事后无法补救。
+
+#### 三个从真实报告中学到的字段
+
+以下三项来自 [真实用例 001](../fixtures/001-pediatric-emergency/case.md)(深圳市儿童医院急诊报告),是纸面设计时没想到的:
+
+| 字段 | 为什么重要 |
+|---|---|
+| **`report_no`(报告编号)** | 中国医院报告普遍印有唯一报告编号(如 `926081701634`)。这是**天然的幂等键** —— 同一份单据被重复拍照上传时可自动去重,比 sha256 更可靠(重拍一张照片 sha256 就变了,报告编号不变)。建议加唯一约束 `(facility_id, report_no)`。 |
+| **`collected_at`(采集时刻)** | 报告上印着精确到分钟的采集时间。**同一次抽血产生的多份报告,采集时刻完全相同** —— 这是 `encounter` 自动归组最强的信号,比"同日同院"精确得多。 |
+| **`clinical_diagnosis`(临床诊断)** | 报告单上直接印着申请时的临床诊断(如 `呕吐查因`)。**不需要问用户** —— 问答模板里对应的问题应降级为"确认 / 补充",而不是从零提问。 |
 
 #### `doc_type` 取值
 
@@ -177,8 +195,14 @@ PK `(account_id, person_id)`
 | `mime_type` | text | |
 | `width` / `height` | int | 像素 |
 | `thumb_key` | text nullable | 缩略图(派生物,可重建) |
+| `page_label` | text nullable | 页脚原文,如 `第1页,共2页` |
+| `capture_order` | int | **拍摄顺序** —— 与 `page_no` 分开存 |
 
 唯一约束:`(document_id, page_no)`
+
+> ⚠️ **`page_no` 必须从页脚的「第 N 页,共 M 页」解析,不能等同于拍摄顺序。**
+> 真实场景中用户经常先拍到第 2 页(纸是折叠的、翻页顺序反了)。而多页报告的项目编号是**跨页连续**的(第 1 页 NO 1–20,第 2 页 NO 21–27),顺序错了会导致提取结果错乱。
+> `capture_order` 单独保留,用于排查上传问题。
 
 ---
 
@@ -220,6 +244,7 @@ PK `(account_id, person_id)`
 | `encounter_id` | uuid FK nullable | |
 | **概念标识** | | |
 | `concept_code` | text | 内部指标字典 code,如 `LDL_C` |
+| `qualifier` | text nullable | **限定词**,如 `corrected`(校正)。见下方 ⚠️ |
 | `loinc_code` | text nullable | 国际标准编码 |
 | `local_name` | text | **报告上的原始名称** —— 永远保留 |
 | **数值** | | |
@@ -238,7 +263,9 @@ PK `(account_id, person_id)`
 | `ref_unit` | text nullable | |
 | `abnormal_flag` | enum(`H`,`L`,`HH`,`LL`,`N`,`A`) nullable | 报告上的 ↑↓ |
 | **上下文** | | |
-| `method` | text nullable | 方法学(如 LDL 直接法 vs 计算法) |
+| `method` | text nullable | 方法学(流式细胞计数法 / 电阻抗法 / 散射比浊法…) |
+| `device` | text nullable | **检测仪器**,如 `血气iSTAT1-300G`、`BC-7500-2`。见下方 ⚠️ |
+| `result_kind` | enum(`measured`,`calculated`,`input_parameter`) | 实测 / 仪器计算 / 输入参数。见下方 ⚠️ |
 | `specimen` | enum(`serum`,`plasma`,`whole_blood`,`urine`,`other`) nullable | |
 | `collected_at` | timestamptz nullable | 采样时刻(含时间,昼夜节律相关指标需要) |
 | `reported_at` | timestamptz nullable | |
@@ -256,6 +283,44 @@ PK `(account_id, person_id)`
 
 > ⚠️ **`ref_low`/`ref_high` 必须跟着每一条数值走,而不是在系统里定义一套全局"正常范围"。**
 > 不同医院用不同仪器与试剂,参考区间本身就不同。同样的 ALT 45 U/L,在上限 40 的实验室是 ↑,在上限 50 的实验室是正常。这一条如果做错,整个系统的可信度归零。
+
+#### ⚠️ 三个来自真实报告的字段
+
+来源:[真实用例 001](../fixtures/001-pediatric-emergency/case.md)。
+
+**1. `qualifier` —— 同一份报告里同一指标会出现两次**
+
+血气报告同时给出「氧分压 65」与「氧分压(校正) 67」,**参考区间还不一样**(83–108 / 80–100);pH、二氧化碳分压同理。若都映射到同一个 `concept_code`,趋势图上会出现同一时刻两个点。
+
+```
+唯一性由 (document_id, concept_code, qualifier) 决定,而非 concept_code 单独决定
+```
+
+**2. `device` —— 同一管血、同一指标,不同仪器给出不同值**
+
+真实案例(同一次采血 17:07,两台仪器):
+
+| | 血气 iSTAT1-300G | 血常规 BC-7500-2 |
+|---|---|---|
+| 血红蛋白 | 12.60 **g/dL** = 126 g/L | 130 **g/L** |
+| 红细胞比容 | 37 % | 38.1 % |
+| 参考区间 | 12–17 g/dL(**成人范围**) | 112–149 g/L(**儿童范围**) |
+
+两个数都是对的 —— 方法学不同(iSTAT 从 HCT 推算,血球仪比色法实测)。**但如果天真地把两个 Hb 都归一到 g/L 画进同一条趋势线,会出现"同一天两个血红蛋白值"。**
+
+→ 趋势查询必须能按 `device` 分组或标注;详见 [08 · 医学参考层](./08-medical-reference.md#13-同一管血不同仪器)。
+
+**3. `result_kind` —— 报告上有些行不是检验结果**
+
+血气报告里的「体温 37.5℃」和「吸氧浓度 21.00%」是**血气分析仪的输入参数**(用于计算校正值),不是测量结果。「红细胞比容计算值」「二氧化碳总量」是仪器计算值。
+
+| 取值 | 含义 | 是否进趋势 |
+|---|---|---|
+| `measured` | 仪器实测 | ✅ |
+| `calculated` | 仪器由其他值计算 | ⚠️ 可进,但**同一指标存在实测值时优先用实测** |
+| `input_parameter` | 操作者输入的参数 | ❌ 不进趋势,仅作上下文 |
+
+---
 
 **重跑保护:** 当 `review_status ∈ (confirmed, corrected)` 时,重跑提取**不覆盖**该记录 —— 人工修正永远优先于机器提取。
 
