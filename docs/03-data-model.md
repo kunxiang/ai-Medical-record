@@ -115,10 +115,29 @@ PK `(account_id, person_id)`
 | `department` | text nullable | 科室 |
 | `occurred_on` | date | **就诊日期** |
 | `ended_on` | date nullable | 住院用 |
+| `occurred_at` | timestamptz nullable | 就诊起始时刻(用于时间窗归组) |
 | `chief_complaint` | text | 主诉 / 为什么来 |
 | `diagnosis_text` | text | 医生给的诊断(原文,不做解析) |
 | `doctor_advice` | text | 医生口头说了什么 —— 常常不写在任何单子上 |
 | `created_at` | timestamptz | |
+
+#### ⚠️ 归组用时间窗,不用日历日
+
+[用例 004](../fixtures/004-influenza-visit/) 的急诊在**凌晨 05:09**。若某次就诊 23:50 挂号、次日 00:30 抽血,**按日历日归组会被拆成两次**。
+
+```
+归组条件:同人 + 同机构 + event_time 落在同一时间窗(如 ±12h)
+```
+
+**就诊内还有更细的一层 —— 采样事件。** 同一次就诊里,鼻拭子采于 05:09、末梢血采于 05:14,是**两次采样**:
+
+```
+encounter(就诊)
+  └── 按 collected_at 聚合的采样事件
+        └── document(报告)
+```
+
+> 这修正了[用例 001](../fixtures/001-pediatric-emergency/) 的说法:「同采集时刻是归组最强信号」—— 那是**采样事件**粒度,不是就诊粒度。无需为此建表,查询层按 `collected_at` 聚合即可。
 
 ---
 
@@ -154,6 +173,9 @@ PK `(account_id, person_id)`
 | `ordering_doctor` | text nullable | 申请医师 |
 | `clinical_diagnosis` | text nullable | **报告上直接印的临床诊断** —— 见下方说明 |
 | `performed_by` / `verified_by_name` | text nullable | 检验者 / 审核者 |
+| `report_notes` | text nullable | **备注栏原文**(报告自带的结果解释)—— 见下方 |
+| `report_notes_source` | text | 固定 `report_original`,与系统生成内容区分 |
+| `column_set` | jsonb nullable | 该报告的表头列集合 —— 见下方 ⚠️ |
 | `uploaded_by` | uuid FK account | |
 | `status` | enum(`uploading`,`uploaded`,`needs_person_confirm`,`ready`,`failed`) | |
 | `created_at` | timestamptz | |
@@ -169,6 +191,27 @@ PK `(account_id, person_id)`
 | **`report_no`(报告编号)** | 中国医院报告普遍印有唯一报告编号(如 `926081701634`)。这是**天然的幂等键** —— 同一份单据被重复拍照上传时可自动去重,比 sha256 更可靠(重拍一张照片 sha256 就变了,报告编号不变)。建议加唯一约束 `(facility_id, report_no)`。 |
 | **`collected_at`(采集时刻)** | 报告上印着精确到分钟的采集时间。**同一次抽血产生的多份报告,采集时刻完全相同** —— 这是 `encounter` 自动归组最强的信号,比"同日同院"精确得多。 |
 | **`clinical_diagnosis`(临床诊断)** | 报告单上直接印着申请时的临床诊断(如 `呕吐查因`)。⚠️ **这是为开单/计费服务的简化标签,不是完整临床图景** —— 真实案例中单据印「呕吐查因」,而家长描述本次就诊主因还包括腹泻。正确做法是**预填 + 让用户补充确认**,不是省掉提问。 |
+
+#### ⚠️ `column_set` —— 列结构不可假设固定
+
+[用例 004](../fixtures/004-influenza-visit/):同一医院、**同一天**的两份报告,列结构不同。
+
+| 报告 | 列 |
+|---|---|
+| 血常规 | NO · 检验项目 · 结果 · 提示 · 参考区间 · **单位** · **检测仪器** · 检测方法 |
+| COVID 抗原 | NO · 检验项目 · 结果 · 提示 · 参考区间 · 检测方法 |
+
+COVID 单没有「单位」与「检测仪器」列。**按固定列序解析必然错位** → 必须按表头动态解析,并记录实际列集合。
+
+#### `report_notes` —— 报告自带的结果解释
+
+[用例 004](../fixtures/004-influenza-visit/) 的 COVID 单备注栏印着中英双语说明:
+
+> 阴性结果表示:样本中没有检出新型冠状病毒抗原,但**不能完全排除感染**,可能与低病毒载量等因素相关,**需结合临床表现**,必要时核酸复查。
+
+这是**报告原文的一部分**,不是系统生成的解读。必须原文保留并标注 `report_notes_source = report_original`,**不得与系统输出混淆**。
+
+> 附带印证:连医院自己都在说「不能完全排除」「需结合临床表现」。系统更不该下结论。
 
 #### ⚠️ `event_time` —— 跨文档类型的时间轴对齐
 
@@ -329,7 +372,8 @@ PK `(account_id, person_id)`
 | `ref_low` / `ref_high` | numeric nullable | **该次报告自带的区间** |
 | `ref_text` | text nullable | 非数值型区间,如 `"阴性"` |
 | `ref_unit` | text nullable | |
-| `abnormal_flag` | enum(`H`,`L`,`HH`,`LL`,`N`,`A`) nullable | 报告上的 ↑↓ |
+| `abnormal_flag_raw` | text nullable | **报告上的原始符号** —— 见下方 ⚠️ |
+| `abnormal_flag` | enum(`H`,`L`,`HH`,`LL`,`N`,`A`) nullable | 标准化后 |
 | **上下文** | | |
 | `method` | text nullable | 方法学(流式细胞计数法 / 电阻抗法 / 散射比浊法…) |
 | `device` | text nullable | **检测仪器**,如 `血气iSTAT1-300G`、`BC-7500-2`。见下方 ⚠️ |
@@ -350,7 +394,39 @@ PK `(account_id, person_id)`
 | `created_at` | timestamptz | |
 
 > ⚠️ **`ref_low`/`ref_high` 必须跟着每一条数值走,而不是在系统里定义一套全局"正常范围"。**
-> 不同医院用不同仪器与试剂,参考区间本身就不同。同样的 ALT 45 U/L,在上限 40 的实验室是 ↑,在上限 50 的实验室是正常。这一条如果做错,整个系统的可信度归零。
+>
+> 实证([用例 004](../fixtures/004-influenza-visit/)):**同一家医院、同一台 BC-7500-2、同一个 3 岁 0 月的孩子、相隔 7 天,27 项中 14 项参考区间不同。**
+>
+> | 项目 | 08-10(末梢血) | 08-17(静脉血) |
+> |---|---|---|
+> | WBC | 4.90–12.70 | 4.40–11.90 |
+> | Hb | 115.0–150.0 | 112.0–149.0 |
+> | LYMPH% | 26.0–67.0 | 23.0–69.0 |
+>
+> 原因(标本类型切换 or 实验室更新区间库)**从单据无法判定,但工程要求与原因无关**:
+> **任何形式的参考区间缓存、复用、跨报告继承,都是错的。**
+
+#### ⚠️ 5. `abnormal_flag_raw` —— 图例不可信
+
+[用例 004](../fixtures/004-influenza-visit/) 的流感单:甲流**阳性**,提示列标的是 **`↑`**。
+而同一张单的页脚图例明确印着 `※:阳性`。
+
+**单据自己印的规范与自己的用法对不上。** 按图例硬编码映射 → 阳性被漏标。
+
+→ `abnormal_flag_raw` 保留原始符号;标准化 flag 由**上下文判断**得出(结果「阳性」+ 参考区间「阴性」→ `A`),不由符号表查得。
+
+#### ⚠️ 6. `specimen` 是趋势分组维度,不是元数据
+
+同患者、同仪器、7 天:
+
+| 指标 | 08-10 **末梢血** | 08-17 **静脉血** | 变化 |
+|---|---|---|---|
+| PLT | 216 | 417 | **+93%** |
+| WBC | 4.68 | 7.02 | +50% |
+
+**末梢血的血小板计数系统性偏低**(采集时血小板聚集黏附)。216 → 417 中标本类型贡献多少、真实变化多少,**数据本身分辨不了**。
+
+→ 趋势按 `specimen` 分组或虚线标注;**跨标本类型不直接连线、不计算 RCV**。
 
 #### ⚠️ 三个来自真实报告的字段
 

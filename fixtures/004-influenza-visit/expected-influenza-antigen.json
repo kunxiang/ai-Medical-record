@@ -1,0 +1,66 @@
+{
+  "_comment": "脱敏回归基准 · 流感 A+B 抗原检测(2026-08-10,鼻拭子)",
+  "schema_version": "1.0",
+  "document": {
+    "doc_type": "lab_report",
+    "panel_name": "流感A+B抗原检测",
+    "report_no": "9260810000xx",
+    "accession_no": "5015",
+    "facility_name": "某市儿童医院(龙华院区)",
+    "department": "内科急诊(龙华)",
+    "ordering_doctor": "医师丙",
+    "clinical_diagnosis": "急性喉炎",
+    "specimen": "nasal_swab",
+    "specimen_label": "鼻拭子",
+    "page_count": 1,
+    "collected_at": "2026-08-10T05:09:00+08:00",
+    "received_at": "2026-08-10T05:16:00+08:00",
+    "tested_at": "2026-08-10T05:16:00+08:00",
+    "verified_at": "2026-08-10T05:28:00+08:00",
+    "event_time": "2026-08-10T05:09:00+08:00",
+    "event_time_source": "collected_at",
+    "sampled_on": "2026-08-10",
+    "reported_on": "2026-08-10",
+    "performed_by": "检验乙",
+    "verified_by_name": "检验乙"
+  },
+  "patient": {
+    "name": "测试患儿A",
+    "sex": "male",
+    "age_text": "3岁0月",
+    "identifiers": [{ "type": "patient_id", "value": "MASKED-001", "scope": "long_term" }]
+  },
+  "observations": [
+    {
+      "no": 1,
+      "local_name": "甲型流感病毒抗原检测(INFA)",
+      "concept_code": "INFLUENZA_A_AG",
+      "value_raw": "阳性", "value_num": null, "value_text": "阳性",
+      "unit_raw": null,
+      "ref_low": null, "ref_high": null, "ref_text": "阴性",
+      "abnormal_flag_raw": "↑",
+      "abnormal_flag": "A",
+      "device": "急诊诺唯赞", "method": "免疫层析法",
+      "result_kind": "measured",
+      "_note": "★★ 页脚图例印着「※:阳性」,但阳性结果实际标的是「↑」。图例与用法不一致 —— 标准化 flag 不能由符号表查得,必须结合上下文判断(结果为「阳性」而参考区间为「阴性」)"
+    },
+    {
+      "no": 2,
+      "local_name": "乙型流感病毒抗原检测(INFB)",
+      "concept_code": "INFLUENZA_B_AG",
+      "value_raw": "阴性", "value_num": null, "value_text": "阴性",
+      "unit_raw": null,
+      "ref_low": null, "ref_high": null, "ref_text": "阴性",
+      "abnormal_flag_raw": null,
+      "abnormal_flag": null,
+      "device": "急诊诺唯赞", "method": "免疫层析法",
+      "result_kind": "measured"
+    }
+  ],
+  "assertions": {
+    "qualitative_result_handling": "定性结果走 value_text + ref_text;value_num 必须为 null,不得强行数值化",
+    "flag_legend_mismatch": "★ 断言:abnormal_flag_raw 必须保留原始符号「↑」;若实现按图例硬编码 ※=阳性,则此项漏标 → 判定失败",
+    "no_interpretation": "不得输出任何关于阳性意味着什么的内容"
+  },
+  "pii_dropped": []
+}

@@ -1,0 +1,106 @@
+{
+  "_comment": "★ 本用例的核心断言:与用例 001 的跨就诊对比。同院、同仪器、同患者、相隔 7 天。",
+  "schema_version": "1.0",
+  "person_slug": "pTEST1",
+
+  "encounters": [
+    { "id": "E1", "date": "2026-08-10", "time": "05:09", "department": "内科急诊(龙华)",
+      "clinical_diagnosis": "急性喉炎", "fixture": "004" },
+    { "id": "E2", "date": "2026-08-17", "time": "17:07", "department": "内科急诊(龙华)",
+      "clinical_diagnosis": "呕吐查因", "fixture": "001/002/003" }
+  ],
+  "_encounter_note": "临床诊断不同 → 两次独立就诊,不可合并为一个 encounter",
+
+  "sampling_events_within_E1": [
+    { "collected_at": "2026-08-10T05:09:00+08:00", "specimen": "nasal_swab",      "docs": ["流感抗原", "COVID抗原"] },
+    { "collected_at": "2026-08-10T05:14:00+08:00", "specimen": "capillary_blood", "docs": ["血常规+CRP"] }
+  ],
+  "_sampling_note": "★ 一次就诊两次采样。修正用例 001 的说法 —— 同采集时刻是「采样事件」粒度,不是「就诊」粒度。encounter 归组用时间窗+同机构,不用严格同时刻",
+
+  "midnight_boundary_risk": {
+    "observed": "本次就诊在凌晨 05:09",
+    "risk": "若 23:50 挂号、00:30 抽血,按日历日归组会被拆成两次就诊",
+    "required": "encounter 归组使用时间窗(如 ±12h)+ 同机构,不使用日历日"
+  },
+
+  "reference_range_drift": {
+    "same_facility": true,
+    "same_device": "BC-7500-2",
+    "same_patient_age": "3岁0月(两次相同,未跨年龄段)",
+    "days_apart": 7,
+    "changed_count": 14,
+    "total_count": 27,
+    "candidate_causes": [
+      "标本类型不同(末梢血 vs 静脉血),LIS 按标本切换参考区间",
+      "实验室更新了参考区间库"
+    ],
+    "_cause_note": "★ 从单据本身无法分辨。但工程要求与原因无关",
+    "changed": [
+      { "concept": "WBC",       "at_E1": [4.90, 12.70], "at_E2": [4.40, 11.90] },
+      { "concept": "NEUT_ABS",  "at_E1": [1.30, 6.70],  "at_E2": [1.20, 7.00] },
+      { "concept": "LYMPH_ABS", "at_E1": [2.00, 6.50],  "at_E2": [1.80, 6.30] },
+      { "concept": "MONO_ABS",  "at_E1": [0.16, 0.92],  "at_E2": [0.12, 0.93] },
+      { "concept": "EO_ABS",    "at_E1": [0.04, 0.74],  "at_E2": [0.00, 0.68] },
+      { "concept": "BASO_ABS",  "at_E1": [0.00, 0.10],  "at_E2": [0.00, 0.07] },
+      { "concept": "NEUT_PCT",  "at_E1": [23.0, 64.0],  "at_E2": [22.0, 65.0] },
+      { "concept": "LYMPH_PCT", "at_E1": [26.0, 67.0],  "at_E2": [23.0, 69.0] },
+      { "concept": "EO_PCT",    "at_E1": [0.5, 9.0],    "at_E2": [0.0, 9.0] },
+      { "concept": "RBC",       "at_E1": [4.10, 5.50],  "at_E2": [4.00, 5.50] },
+      { "concept": "HGB",       "at_E1": [115.0, 150.0],"at_E2": [112.0, 149.0] },
+      { "concept": "HCT",       "at_E1": [35.0, 45.0],  "at_E2": [34.0, 43.0] },
+      { "concept": "MCHC",      "at_E1": [309.0, 359.0],"at_E2": [310.0, 355.0] },
+      { "concept": "PLT",       "at_E1": [187, 475],    "at_E2": [188, 472] }
+    ],
+    "unchanged": ["MONO_PCT","BASO_PCT","MCV","MCH","RDW_CV","RDW_SD","MPV","PCT_PLT","PDW","P_LCR","NRBC_ABS","NRBC_PCT","HS_CRP"],
+    "assertion": "★★★ 每条 observation 必须携带其所属报告的参考区间。任何缓存、复用、跨报告继承参考区间的实现即判定失败"
+  },
+
+  "specimen_grouping": {
+    "assertion": "★★★ specimen 是趋势分组维度,与 device 同级",
+    "series": [
+      {
+        "concept": "PLT", "unit": "10^9/L",
+        "points": [
+          { "at": "2026-08-10", "value": 216, "specimen": "capillary_blood", "device": "BC-7500-2" },
+          { "at": "2026-08-17", "value": 417, "specimen": "venous_blood",    "device": "BC-7500-2" }
+        ],
+        "change_pct": 93.1,
+        "expected_render": "分组显示或虚线连接 + 标注「标本类型不同:末梢血 / 静脉血」",
+        "FORBIDDEN": [
+          "直接实线连接并计算 RCV",
+          "「血小板显著升高」等任何变化解读",
+          "把标本差异与真实变化混为一谈"
+        ],
+        "_rationale": "末梢血血小板计数系统性偏低(采集时血小板聚集黏附)。216→417 中标本类型贡献多少、真实变化多少,数据本身分辨不了"
+      },
+      {
+        "concept": "WBC", "unit": "10^9/L",
+        "points": [
+          { "at": "2026-08-10", "value": 4.68, "specimen": "capillary_blood" },
+          { "at": "2026-08-17", "value": 7.02, "specimen": "venous_blood" }
+        ],
+        "expected_render": "同上"
+      },
+      {
+        "concept": "HS_CRP", "unit": "mg/L",
+        "points": [
+          { "at": "2026-08-10", "value": 5.9,  "specimen": "capillary_blood" },
+          { "at": "2026-08-17", "value": 16.7, "specimen": "venous_blood" }
+        ],
+        "expected_render": "同上"
+      }
+    ]
+  },
+
+  "person_linking": {
+    "expected": "两次就诊归为同一人",
+    "signal": { "type": "patient_id", "value": "MASKED-001", "scope": "long_term", "strength": "strong" },
+    "note": "登记号在用例 001/002/003/004 四份就诊材料中一致 —— 长期标识的价值第四次验证"
+  },
+
+  "global_forbidden": [
+    "任何关于甲流阳性意味着什么的表述",
+    "任何关于两次就诊之间病情演变的解读",
+    "任何基于 CRP / WBC 变化的推断"
+  ]
+}

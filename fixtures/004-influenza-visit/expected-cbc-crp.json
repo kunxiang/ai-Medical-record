@@ -1,0 +1,88 @@
+{
+  "_comment": "脱敏回归基准 · 血常规+超敏CRP(2026-08-10,末梢血)。与用例 001 同仪器、相隔 7 天、参考区间不同。",
+  "schema_version": "1.0",
+  "document": {
+    "doc_type": "lab_report",
+    "panel_name": "血常规(五分类)+超敏CRP",
+    "report_no": "9260810000xx",
+    "accession_no": "1016",
+    "facility_name": "某市儿童医院(龙华院区)",
+    "department": "内科急诊(龙华)",
+    "ordering_doctor": "医师丙",
+    "clinical_diagnosis": "急性喉炎",
+    "specimen": "capillary_blood",
+    "specimen_label": "末梢血",
+    "_specimen_note": "★★ 用例 001 是「静脉血」。同仪器、同患者、相隔 7 天,标本类型不同 —— 这是趋势分组维度,不是元数据",
+    "page_count": 2,
+    "collected_at": "2026-08-10T05:14:00+08:00",
+    "received_at": "2026-08-10T05:17:00+08:00",
+    "tested_at": "2026-08-10T05:17:00+08:00",
+    "verified_at": "2026-08-10T05:23:00+08:00",
+    "event_time": "2026-08-10T05:14:00+08:00",
+    "event_time_source": "collected_at",
+    "sampled_on": "2026-08-10",
+    "reported_on": "2026-08-10"
+  },
+  "patient": {
+    "name": "测试患儿A", "sex": "male", "age_text": "3岁0月",
+    "identifiers": [{ "type": "patient_id", "value": "MASKED-001", "scope": "long_term" }]
+  },
+  "pages": [
+    { "page_no": 1, "page_label": "第1页,共2页", "item_range": [1, 20] },
+    { "page_no": 2, "page_label": "第2页,共2页", "item_range": [21, 27],
+      "has_graphics": ["PLT 直方图", "RBC 直方图", "DIFF 散点图", "WNB 散点图"] }
+  ],
+  "observations": [
+    { "no": 1,  "local_name": "白细胞计数(WBC)",              "concept_code": "WBC",      "value_num": 4.68, "unit_raw": "10^9/L",  "ref_low": 4.90,  "ref_high": 12.70, "abnormal_flag": "L",  "method": "流式细胞计数法", "result_kind": "measured" },
+    { "no": 2,  "local_name": "中性粒细胞绝对值(NEUT#)",      "concept_code": "NEUT_ABS", "value_num": 2.58, "unit_raw": "10^9/L",  "ref_low": 1.30,  "ref_high": 6.70,  "abnormal_flag": null, "method": "计算法",         "result_kind": "calculated" },
+    { "no": 3,  "local_name": "淋巴细胞绝对值(LYMPH#)",       "concept_code": "LYMPH_ABS","value_num": 1.42, "unit_raw": "10^9/L",  "ref_low": 2.00,  "ref_high": 6.50,  "abnormal_flag": "L",  "method": "计算法",         "result_kind": "calculated" },
+    { "no": 4,  "local_name": "单核细胞绝对值(MONO#)",        "concept_code": "MONO_ABS", "value_num": 0.64, "unit_raw": "10^9/L",  "ref_low": 0.16,  "ref_high": 0.92,  "abnormal_flag": null, "method": "计算法",         "result_kind": "calculated" },
+    { "no": 5,  "local_name": "嗜酸性粒细胞绝对值(EO#)",      "concept_code": "EO_ABS",   "value_num": 0.04, "unit_raw": "10^9/L",  "ref_low": 0.04,  "ref_high": 0.74,  "abnormal_flag": null, "method": "计算法",         "result_kind": "calculated" },
+    { "no": 6,  "local_name": "嗜碱性粒细胞绝对值(BASO#)",    "concept_code": "BASO_ABS", "value_num": 0.00, "unit_raw": "10^9/L",  "ref_low": 0.00,  "ref_high": 0.10,  "abnormal_flag": null, "method": "计算法",         "result_kind": "calculated" },
+    { "no": 7,  "local_name": "中性粒细胞比例(NEUT%)",        "concept_code": "NEUT_PCT", "value_num": 55.0, "unit_raw": "%",       "ref_low": 23.0,  "ref_high": 64.0,  "abnormal_flag": null, "method": "流式细胞计数法", "result_kind": "measured" },
+    { "no": 8,  "local_name": "淋巴细胞比例(LYMPH%)",         "concept_code": "LYMPH_PCT","value_num": 30.4, "unit_raw": "%",       "ref_low": 26.0,  "ref_high": 67.0,  "abnormal_flag": null, "method": "流式细胞计数法", "result_kind": "measured" },
+    { "no": 9,  "local_name": "单核细胞比例(MONO%)",          "concept_code": "MONO_PCT", "value_num": 13.6, "unit_raw": "%",       "ref_low": 2.0,   "ref_high": 11.0,  "abnormal_flag": "H",  "method": "流式细胞计数法", "result_kind": "measured" },
+    { "no": 10, "local_name": "嗜酸性粒细胞比例(EO%)",        "concept_code": "EO_PCT",   "value_num": 0.9,  "unit_raw": "%",       "ref_low": 0.5,   "ref_high": 9.0,   "abnormal_flag": null, "method": "流式细胞计数法", "result_kind": "measured" },
+    { "no": 11, "local_name": "嗜碱性粒细胞比例(BASO%)",      "concept_code": "BASO_PCT", "value_num": 0.1,  "unit_raw": "%",       "ref_low": 0.0,   "ref_high": 1.0,   "abnormal_flag": null, "method": "流式细胞计数法", "result_kind": "measured" },
+    { "no": 12, "local_name": "红细胞计数(RBC)",              "concept_code": "RBC",      "value_num": 5.31, "unit_raw": "10^12/L", "ref_low": 4.10,  "ref_high": 5.50,  "abnormal_flag": null, "method": "电阻抗法",       "result_kind": "measured" },
+    { "no": 13, "local_name": "血红蛋白量(Hb)",               "concept_code": "HGB",      "value_num": 133,  "unit_raw": "g/L",     "ref_low": 115.0, "ref_high": 150.0, "abnormal_flag": null, "method": "比色法",         "result_kind": "measured" },
+    { "no": 14, "local_name": "红细胞比积(HCT)",              "concept_code": "HCT",      "value_num": 39.2, "unit_raw": "%",       "ref_low": 35.0,  "ref_high": 45.0,  "abnormal_flag": null, "method": "计算法",         "result_kind": "calculated" },
+    { "no": 15, "local_name": "红细胞平均体积(MCV)",          "concept_code": "MCV",      "value_num": 73.8, "unit_raw": "fL",      "ref_low": 76.0,  "ref_high": 88.0,  "abnormal_flag": "L",  "method": "电阻抗法",       "result_kind": "calculated" },
+    { "no": 16, "local_name": "平均红细胞血红蛋白量(MCH)",    "concept_code": "MCH",      "value_num": 25.1, "unit_raw": "pg",      "ref_low": 24.0,  "ref_high": 30.0,  "abnormal_flag": null, "method": "计算法",         "result_kind": "calculated" },
+    { "no": 17, "local_name": "平均红细胞血红蛋白浓度(MCHC)", "concept_code": "MCHC",     "value_num": 339,  "unit_raw": "g/L",     "ref_low": 309.0, "ref_high": 359.0, "abnormal_flag": null, "method": "计算法",         "result_kind": "calculated" },
+    { "no": 18, "local_name": "红细胞变异系数(RDW-CV)",       "concept_code": "RDW_CV",   "value_num": 13.2, "unit_raw": "%",       "ref_low": 0.0,   "ref_high": 15.0,  "abnormal_flag": null, "method": "计算法",         "result_kind": "calculated" },
+    { "no": 19, "local_name": "红细胞分布宽度(RDW-SD)",       "concept_code": "RDW_SD",   "value_num": 36.2, "unit_raw": "fL",      "ref_low": 37.0,  "ref_high": 50.0,  "abnormal_flag": "L",  "method": "计算法",         "result_kind": "calculated" },
+    { "no": 20, "local_name": "血小板(PLT)",                  "concept_code": "PLT",      "value_num": 216,  "unit_raw": "10^9/L",  "ref_low": 187,   "ref_high": 475,   "abnormal_flag": null, "method": "电阻抗法",       "result_kind": "measured" },
+
+    { "no": 21, "local_name": "血小板平均体积(MPV)",          "concept_code": "MPV",      "value_num": 8.1,  "unit_raw": "fL",      "ref_low": 7.4,   "ref_high": 10.4,  "abnormal_flag": null, "method": "电阻抗法",       "result_kind": "measured" },
+    { "no": 22, "local_name": "血小板压积(PCT)",              "concept_code": "PCT_PLT",  "value_num": 0.18, "unit_raw": "%",       "ref_low": 0.11,  "ref_high": 0.28,  "abnormal_flag": null, "method": "计算法",         "result_kind": "calculated" },
+    { "no": 23, "local_name": "血小板分布宽度(PDW)",          "concept_code": "PDW",      "value_num": 15.4, "unit_raw": null,      "ref_low": 9.0,   "ref_high": 17.0,  "abnormal_flag": null, "method": "计算法",         "result_kind": "calculated" },
+    { "no": 24, "local_name": "大型血小板比率(P-LCR)",        "concept_code": "P_LCR",    "value_num": 14.3, "unit_raw": "%",       "ref_low": 13.0,  "ref_high": 43.0,  "abnormal_flag": null, "method": "计算法",         "result_kind": "calculated" },
+    { "no": 25, "local_name": "有核红细胞绝对值(NRBC#)",      "concept_code": "NRBC_ABS", "value_num": 0.00, "unit_raw": "10^9/L",  "ref_low": 0.00,  "ref_high": 0.50,  "abnormal_flag": null, "method": "流式细胞计数法", "result_kind": "measured" },
+    { "no": 26, "local_name": "有核红细胞比例(NRBC%)",        "concept_code": "NRBC_PCT", "value_num": 0.0,  "unit_raw": "/100WBC", "ref_low": 0.0,   "ref_high": 1.0,   "abnormal_flag": null, "method": "计算法",         "result_kind": "calculated" },
+    { "no": 27, "local_name": "超敏C-反应蛋白(CRP)",          "concept_code": "HS_CRP",   "value_num": 5.9,  "unit_raw": "mg/L",    "ref_low": 0.0,   "ref_high": 10.0,  "abnormal_flag": null, "method": "散射比浊法",     "result_kind": "measured" }
+  ],
+  "checks": [
+    { "rule": "wbc_differential_sum",      "computed": 100.000, "reported": 100,   "diff_pct": 0.00, "passed": true },
+    { "rule": "wbc_absolute_sum",          "computed": 4.680,   "reported": 4.68,  "diff_pct": 0.00, "passed": true },
+    { "rule": "wbc_absolute_consistency",  "detail": [
+        { "item": "NEUT",  "computed": 2.574, "reported": 2.58 },
+        { "item": "LYMPH", "computed": 1.423, "reported": 1.42 },
+        { "item": "MONO",  "computed": 0.636, "reported": 0.64 }
+      ], "passed": true },
+    { "rule": "rbc_indices", "detail": [
+        { "item": "MCV",  "computed": 73.823,  "reported": 73.8 },
+        { "item": "MCH",  "computed": 25.047,  "reported": 25.1 },
+        { "item": "MCHC", "computed": 339.286, "reported": 339 }
+      ], "passed": true },
+    { "rule": "platelet_crit", "computed": 0.175, "reported": 0.18, "diff_pct": 2.80, "passed": true }
+  ],
+  "skipped": [
+    { "rule": "henderson_hasselbalch", "reason": "missing_input" },
+    { "rule": "istat_hb_hct",          "reason": "missing_input" },
+    { "rule": "anion_gap",             "reason": "missing_input" },
+    { "rule": "ellipsoid_volume",      "reason": "not_applicable" }
+  ],
+  "_all_device": "BC-7500-2",
+  "pii_dropped": []
+}

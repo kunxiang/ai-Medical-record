@@ -1,0 +1,71 @@
+{
+  "_comment": "脱敏回归基准 · COVID-19 抗原检测(2026-08-10,鼻拭子)。核心断言:中英双语重复行必须合并。",
+  "schema_version": "1.0",
+  "document": {
+    "doc_type": "lab_report",
+    "panel_name": "新型冠状病毒(COVID-19)抗原检测",
+    "report_no": "9260810000xx",
+    "accession_no": "6011",
+    "facility_name": "某市儿童医院(龙华院区)",
+    "department": "内科急诊(龙华)",
+    "ordering_doctor": "医师丙",
+    "clinical_diagnosis": "急性喉炎",
+    "specimen": "nasal_swab",
+    "specimen_label": "鼻拭子",
+    "page_count": 1,
+    "collected_at": "2026-08-10T05:09:00+08:00",
+    "received_at": "2026-08-10T05:16:00+08:00",
+    "tested_at": "2026-08-10T05:16:00+08:00",
+    "verified_at": "2026-08-10T05:27:00+08:00",
+    "event_time": "2026-08-10T05:09:00+08:00",
+    "event_time_source": "collected_at",
+    "sampled_on": "2026-08-10",
+    "reported_on": "2026-08-10",
+
+    "column_set": ["NO", "检验项目", "结果", "提示", "参考区间", "检测方法"],
+    "_column_note": "★ 本报告没有「单位」与「检测仪器」列,而同院同日的血常规两列都有。同一医院不同报告的列结构不同 —— 列集合不可假设固定,必须按表头动态解析",
+
+    "report_notes": "阴性结果表示:样本中没有检出新型冠状病毒抗原,但不能完全排除感染,可能与低病毒载量等因素相关,需结合临床表现,必要时核酸复查。阳性结果表示:样本中检出新型冠状病毒抗原。\nNegative results indicate: The sample did not detect novel coronavirus antigens, but this does not completely rule out infection. This may be related to factors such as low viral load. Results should be considered in conjunction with clinical presentation, and follow-up nucleic acid testing if necessary when indicated.\nPositive results indicate: Novel coronavirus antigens were detected in the sample.",
+    "report_notes_source": "report_original",
+    "_report_notes_note": "★ 报告自带的结果解释,是原文的一部分,不是系统生成的解读。必须标注来源,不得与系统输出混淆"
+  },
+  "patient": {
+    "name": "测试患儿A",
+    "sex": "male",
+    "age_text": "3岁0月",
+    "identifiers": [{ "type": "patient_id", "value": "MASKED-001", "scope": "long_term" }]
+  },
+
+  "raw_rows": [
+    { "no": 1, "name": "新型冠状病毒(COVID-19)抗原检测", "result": "阴性",     "ref": "阴性",     "method": "金标法" },
+    { "no": 2, "name": "COVID-19 Antigen Test",          "result": "Negative", "ref": "Negative", "method": "Gold-based LFIA" }
+  ],
+
+  "observations": [
+    {
+      "local_name": "新型冠状病毒(COVID-19)抗原检测",
+      "local_name_alias_en": "COVID-19 Antigen Test",
+      "concept_code": "SARS_COV2_AG",
+      "value_raw": "阴性", "value_num": null, "value_text": "阴性",
+      "unit_raw": null,
+      "ref_low": null, "ref_high": null, "ref_text": "阴性",
+      "abnormal_flag_raw": null, "abnormal_flag": null,
+      "device": null, "method": "金标法",
+      "method_alias_en": "Gold-based LFIA",
+      "result_kind": "measured",
+      "merged_from_rows": [1, 2]
+    }
+  ],
+
+  "assertions": {
+    "bilingual_row_merge": {
+      "expected": "raw_rows 的 2 行合并为 1 条 observation",
+      "reason": "值语义等价(阴性 ≡ Negative)、参考区间等价、方法学对应(金标法 ≡ Gold-based LFIA)",
+      "FAIL_IF": "输出 2 条 observation → 重复计数",
+      "_contrast": "★ 与用例 001 的规则方向相反 —— 那里「氧分压 65 / 氧分压(校正)67」值不等价,必须保留两条。区分依据是语义等价性,不是字符串匹配"
+    },
+    "report_notes_provenance": "report_notes 必须带 source=report_original 标记",
+    "no_interpretation": "系统不得基于 report_notes 生成任何自己的解读"
+  },
+  "pii_dropped": []
+}
