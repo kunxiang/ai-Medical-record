@@ -46,8 +46,10 @@ s3://<bucket>/
 │
 └── _index/
     ├── people.json                          # slug → 姓名 映射表
-    └── manifests/
-        └── {YYYY-MM}.jsonl                  # 每月增量清单,灾难恢复用
+    ├── manifests/
+    │   └── {YYYY-MM}.jsonl                  # 每月增量清单,灾难恢复用
+    └── decisions/
+        └── {YYYY-MM}.jsonl                  # 已确认的归一化决策 + 人工修正(人工层,不可从原件重建,ADR-040)
 ```
 
 ### 目录名示例

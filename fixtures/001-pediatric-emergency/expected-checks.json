@@ -82,5 +82,26 @@
       ],
       "expected_behavior": "中性提示区间不一致;不得自行'纠正',不得判定哪个正确"
     }
+  ],
+  "normalization_assertions": [
+    {
+      "decision_type": "concept_map",
+      "verdict": "ALLOWED",
+      "case": "血气「血红蛋白」与血常规「血红蛋白量(Hb)」映射到同一 concept_code=HGB",
+      "condition": "device / result_kind / specimen 维度必须完整保留在各自 observation 上"
+    },
+    {
+      "decision_type": "row_merge",
+      "verdict": "FORBIDDEN",
+      "case": "将血气 HGB(iSTAT,calculated,126 g/L)与血常规 HGB(BC-7500-2,measured,130 g/L)合并为一条 observation 或同一趋势序列",
+      "reason": "方法学不同,数值真实相差 3.1%;合并是有损操作(ADR-024 / ADR-040)",
+      "_contrast": "与用例 004 COVID 双语行(必须合并)构成一对方向相反的断言 —— 合并与否取决于语义等价性,且合并类决策必须人工确认"
+    },
+    {
+      "decision_type": "row_merge",
+      "verdict": "FORBIDDEN",
+      "case": "「红细胞比容计算值」(iSTAT,37)与「红细胞比积(HCT)」(BC-7500-2,38.1)同理 —— 同概念不同设备,保持两条",
+      "reason": "差 2.9%,均为真实值"
+    }
   ]
 }

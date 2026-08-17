@@ -77,8 +77,8 @@ export function convertToSi(
 ): { value: number; unit: string; version: string } | null;
 ```
 
-- 单位字符串先归一(`mmol/l`、`mmol/L`、`mmol·L⁻¹` → 同一个)
-- 无法识别的单位**返回 null,不猜测**,原值照常入库
+- **单位识别**(报告原文 → UCUM 码)是语义判断,归 AI 决策层并经 `normalization_decision` 缓存(ADR-040);`convertToSi` 只接受已识别的 UCUM 码 —— **换算算术本身保持确定性**
+- 低置信 / 无法识别 → **返回 null,不猜测**,原值照常入库
 - 换算结果记录 `conversion_version`,规则变更时可重跑
 
 ---
@@ -424,11 +424,12 @@ packages/medical/data/concepts.json
 }
 ```
 
-### 维护规则
+### 维护规则(ADR-040 后)
 
-- **别名表持续增长** —— 每遇到一个新的报告写法就补进去
-- 映射失败时 **`concept_code` 置 null,数据照常入库**;字典补全后可重跑映射
-- 变更记入 `packages/medical/data/CHANGELOG.md`
+- **字典是输出,不是输入。** `concepts.json` 是 `normalization_decision` 已确认记录的导出快照(冷启动种子)—— **不手工维护别名表**。新写法未命中缓存 → AI 现场判断 → 人工确认后自动进入缓存
+- 低置信不映射:**`concept_code` 置 null,数据照常入库**;确认后重放补全,无需"人工补字典再重跑"
+- **合并类变更必须人工确认**(拆分可逆,合并有损)
+- 每条已确认决策带 `model_id` / `prompt_version` 与确认人 —— 变更审计直接查决策表;快照导出时自动生成 CHANGELOG
 - `plausible_range` 用于量级校验,**不用于判定异常**
 
 ---

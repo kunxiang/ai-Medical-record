@@ -13,7 +13,7 @@
            │        └────────────────┬─────────────────────────┘
            │                         ▼
            │        ┌──────────────────────────────────────────┐
-           │        │ S3  归一化(单位换算 / 指标字典映射)      │ ★ 纯代码
+           │        │ S3  归一化(判断:AI+决策缓存 / 执行:算术)│ ★ ADR-040
            │        ├──────────────────────────────────────────┤
            │        │ S4  Tier0 结构 + Tier1 算术自洽校验       │ ★ 纯代码
            │        └────────┬────────────────────┬────────────┘
@@ -498,22 +498,43 @@ Tier 0/1 校验失败 ──> 针对性重读(最多 3 轮)──> 通过 ✅
 
 ---
 
-## 5. Stage 3/4 — 归一化与校验(纯代码)
+## 5. Stage 3/4 — 归一化与校验
+
+Stage 3 拆成**判断**与**执行**两半([ADR-040](./adr.md)):
+
+```
+原始行(local_name / unit_raw / 上下文)
+   ↓
+① 判断「这是什么」 —— AI + normalization_decision 缓存
+   指纹 = hash(decision_type, 规范化输入)
+   命中已生效决策 → 直接复用(零成本、确定性重放)
+   未命中 → AI 判断 → 落决策表(proposed)
+        ├─ 映射类(可逆):高置信即生效
+        └─ 合并类(有损):等待人工确认才生效
+   ↓
+② 执行「怎么算」 —— packages/medical 纯函数
+   convertToSi(concept, value, ucum)    // 换算算术,确定性
+   runTier0 / runConsistencyChecks      // 校验算术,确定性
+   deriveFormulas                        // eGFR / 椭球体积…
+```
 
 ```ts
-import { mapConcept, convertToSi, runConsistencyChecks } from '@repo/medical';
+import { convertToSi, runConsistencyChecks } from '@repo/medical';
 
 for (const raw of extracted.observations) {
-  const concept = mapConcept(raw.local_name);        // "低密度脂蛋白胆固醇" → LDL_C
-  const si = convertToSi(concept, raw.value_num, raw.unit_raw);
+  // 判断:缓存命中直接返回;未命中 → AI → 落决策表
+  const d = await resolveDecision('concept_map', fingerprintOf(raw));
+
+  // 执行:只接受已识别的 UCUM 码,算术确定性
+  const si = d?.ucum ? convertToSi(d.concept_code, raw.value_num, d.ucum) : null;
 
   await insertObservation({
     ...raw,
-    concept_code: concept?.code ?? null,
-    loinc_code: concept?.loinc ?? null,
+    concept_code: d?.concept_code ?? null,   // 低置信 → null,原值照常入库
     value_si: si?.value ?? null,
     unit_si: si?.unit ?? null,
     conversion_version: si?.version,
+    normalization_decision_id: d?.id ?? null, // 溯源:为什么这样归一
     review_status: 'unreviewed',
   });
 }
@@ -521,7 +542,7 @@ for (const raw of extracted.observations) {
 const flags = runConsistencyChecks(observations);
 ```
 
-**指标字典映射失败时不要丢弃数据** —— `concept_code` 置 null,`local_name` 与原值照常入库。以后字典补全了可以重跑映射,数据不会丢。
+**不变式保留:低置信不映射,数据不丢。** `concept_code` 置 null、原值照常入库;决策表留 `proposed`,人工确认后**重放映射即可补全** —— 不再需要"人工补字典 → 重跑"的流程,字典成为已确认决策的导出快照。
 
 ---
 

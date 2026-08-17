@@ -137,7 +137,7 @@ account ──┐
 document ──> extraction(v1, model=X, prompt=Y)
                  │
                  ├──> full_text ──────> 全文索引 + embedding
-                 └──> structured ────> 归一化(单位/指标字典)
+                 └──> structured ────> 归一化(判断:AI+决策缓存 / 执行:纯代码)
                                           │
                                           ├──> 算术自洽校验
                                           └──> observation 记录(带 review_status)

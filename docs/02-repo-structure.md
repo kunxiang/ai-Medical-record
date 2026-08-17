@@ -37,16 +37,16 @@ ai-Medical-record/
 │
 ├── packages/
 │   ├── contracts/              # ★ API 契约:类型 + Zod schema + 错误码
-│   ├── medical/                # ★ 医学知识层:纯函数,零依赖
+│   ├── medical/                # ★ 医学执行层:纯函数,零依赖(判断在 AI 决策层,ADR-040)
 │   │   ├── src/
-│   │   │   ├── concepts/       # 指标字典(内部 code ↔ LOINC ↔ 中文别名)
-│   │   │   ├── units/          # 单位换算(UCUM)
+│   │   │   ├── concepts/       # 概念查询 API(消费已确认决策的快照;无人工别名表)
+│   │   │   ├── units/          # 换算算术(UCUM 码之间);单位识别归 AI 决策层
 │   │   │   ├── reference/      # 参考区间处理(按性别/年龄)
 │   │   │   ├── variation/      # 生物学变异 CVi / RCV 计算
 │   │   │   ├── derived/        # 派生指标:eGFR、non-HDL-C、BMI…
 │   │   │   ├── consistency/    # 算术自洽校验规则
 │   │   │   └── groups/         # 预置监控组模板(三高等)
-│   │   └── data/               # 字典与常数,JSON 格式,可独立审阅
+│   │   └── data/               # 确认决策的导出快照 + 医学常数(CVi 等);冷启动种子,不手工维护
 │   │
 │   ├── storage/                # S3 key 生成与解析 + sidecar 序列化
 │   └── ui/                     # (未来)跨端组件
@@ -100,7 +100,7 @@ export type DocType = z.infer<typeof DocType>;
 |---|---|---|
 | 提取 prompt | `apps/api/src/ai/prompts/` | `extract-lab-report.v3.md` |
 | 问答模板 | `apps/api/src/modules/context/templates/` | `lab-report.v2.json` |
-| 指标字典 | `packages/medical/data/` | `concepts.json` + `CHANGELOG.md` |
+| 指标字典快照 | `packages/medical/data/` | 从 `normalization_decision` 已确认记录导出,**不手工编辑**(ADR-040) |
 
 改 prompt = 新建一个版本号更高的文件。历史 `extraction` 记录里存的是版本号,所以两年后仍能知道当时用的是哪一版。
 

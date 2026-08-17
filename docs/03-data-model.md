@@ -15,13 +15,16 @@ account ──< person_access >── person ──< person_identifier
                                  └──< metric_group ──< metric_group_item
 
 facility ──< encounter / document / observation
+
+normalization_decision(独立 —— 按输入指纹缓存 AI 归一化判断,见 §4b)
 ```
 
 **分层含义:**
 
 - **不可变层**:`document`、`document_page` —— 原件,写入后永不修改
 - **派生层**:`extraction`、`observation` —— 可重跑、可版本化
-- **人工层**:`context_answer`、`observation.review_status` —— 人的输入与确认,优先级高于机器
+- **决策层**:`normalization_decision` —— AI 归一化判断的持久缓存,同指纹确定性重放
+- **人工层**:`context_answer`、`observation.review_status`、**已确认的归一化决策** —— 人的输入与确认,优先级高于机器,**不可从原件重建**(须随导出与备份)
 
 ---
 
@@ -405,6 +408,7 @@ version 1 ─ round 1 ──校验失败──> round 2(裁剪区域重读)─�
 | `lab_facility_id` | uuid FK nullable | 检验机构 |
 | **质量与溯源** | | |
 | `confidence` | numeric | AI 置信度 |
+| `normalization_decision_id` | uuid FK nullable | 概念/单位判断的决策溯源(§4b) |
 | `consistency_flags` | jsonb | 自洽校验结果,如 `["wbc_differential_sum_mismatch"]` |
 | `review_status` | enum(`unreviewed`,`confirmed`,`corrected`,`rejected`) | |
 | `reviewed_by` | uuid FK nullable | |
@@ -517,6 +521,47 @@ version 1 ─ round 1 ──校验失败──> round 2(裁剪区域重读)─�
 ---
 
 **重跑保护:** 当 `review_status ∈ (confirmed, corrected)` 时,重跑提取**不覆盖**该记录 —— 人工修正永远优先于机器提取。
+
+---
+
+## 4b. 归一化决策 —— AI 判断的持久层
+
+固定规则表在异质单据面前不收敛([ADR-040](./adr.md))。"这是什么"类判断交给 AI,但 AI 判断必须**持久化、可确认、可重放** —— 这就是本表。
+
+### `normalization_decision`
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `id` | uuid PK | |
+| `decision_type` | enum(`concept_map`,`unit_identify`,`row_merge`,`row_split`,`flag_semantics`,`facility_map`,`encounter_group`,`drug_name_strip`,`pii_identify`,`comparability`) | |
+| `fingerprint` | text | 规范化输入的指纹 —— **同指纹必得同决策** |
+| `input` | jsonb | 原始输入(局部名 / 单位原文 / 上下文摘要) |
+| `output` | jsonb | 判断结果(concept_code / UCUM 码 / 合并指令…) |
+| `confidence` | numeric | |
+| `rationale` | text | AI 给出的理由 —— 审计时回答"为什么 12.60 g/dL 变成了 126 g/L" |
+| `model_id` / `prompt_version` | text | 决策产生时的模型与 prompt(版本护栏) |
+| `status` | enum(`proposed`,`confirmed`,`rejected`,`superseded`) | |
+| `decided_by` | uuid FK nullable | 确认人 |
+| `hit_count` | int | 缓存命中次数 |
+| `created_at` / `confirmed_at` | timestamptz | |
+
+### 工作流
+
+```
+新数据 → 计算指纹 → 命中未失效决策?
+              ├─是→ 直接复用(零成本、确定性重放)
+              └─否→ AI 判断 → 写入 proposed
+                      ├─ 映射类(可逆):高置信即生效,可批量撤销重放
+                      └─ 合并类(有损):等待人工确认才生效
+```
+
+字典由此翻转:`concepts.json` 不再是人工维护的输入,而是**已确认决策的导出快照**(冷启动种子)。
+
+### 三条硬约束
+
+1. **合并类必须人工确认。** 拆分可逆,合并有损 —— 把「红细胞比容计算值」(iSTAT)并进「红细胞比积」(血球仪)会抹掉 2.9% 的真实方法学差异。反例断言见 [用例 001](../fixtures/001-pediatric-emergency/);与之相对,[用例 004](../fixtures/004-influenza-visit/) 的双语行**必须**合并 —— 一对方向相反的断言钉住判断边界。
+2. **低置信不映射。** `concept_code` 置 null,原值照常入库,确认后重放补全。
+3. **已确认决策是人工层。** 不可从原件重建 → 追加导出到 S3 `_index/decisions/`,维持"数据库可从 S3 重建"不变式。
 
 ---
 
@@ -689,6 +734,10 @@ CREATE UNIQUE INDEX ON extraction (document_id) WHERE is_active;
 -- 全文与语义
 CREATE INDEX ON extraction USING gin (full_text gin_trgm_ops);
 CREATE INDEX ON extraction USING ivfflat (full_text_embedding vector_cosine_ops);
+
+-- 归一化决策缓存(同指纹同决策)
+CREATE UNIQUE INDEX ON normalization_decision (decision_type, fingerprint)
+  WHERE status IN ('proposed', 'confirmed');
 ```
 
 ## 9. 与 FHIR / LOINC 的关系
