@@ -165,6 +165,8 @@ encounter(就诊)
 | `source` | enum(`camera`,`album`,`pdf`,`screenshot`,`scan`,`import`) | |
 | `original_filename` | text nullable | |
 | `captured_at` | timestamptz | 拍摄时间(EXIF 优先,否则上传时间) |
+| `capture_date` | date | **key 的日期段**(captured_at 按上传者时区折算,登记时写死;spec m0-02) |
+| `client_document_id` | text | 幂等键,`(uploaded_by, client_document_id)` 唯一(07 §2;spec m0-02) |
 | `sampled_on` | date nullable | **采样日期** —— 做趋势用这个 |
 | `reported_on` | date nullable | **报告日期** |
 | `collected_at` | timestamptz nullable | **采集时刻**(精确到分)—— 见下方说明 |

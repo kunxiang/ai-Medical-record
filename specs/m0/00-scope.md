@@ -16,6 +16,8 @@
 | 7 | 建档 API + 最小上传链 | [06-api-m0.md](./06-api-m0.md) |
 | 8 | 验收 | [99-acceptance.md](./99-acceptance.md) |
 
+`[偏差:vs 09 —— 09 的 M0 清单不含上传与 journal,但其验收句要求"上传一张图";按验收句取齐,且 D1 原则要求 journal 随建档同里程碑。已回写 09。]` 审核记录见 [review-001.md](./review-001.md)。
+
 ## 2. 明确不做(M0 边界)
 
 - **无任何 AI 调用**。分类、提取、归人对账都是 M2+。
@@ -24,7 +26,7 @@
 - **无 encounter 逻辑**:仅建表(02-db-schema),无 API、无归组。
 - **无缩略图/预览**(M1)。`derived/` 前缀在 M0 保持为空。
 - **无批量导入路径**:`status = needs_person_confirm` 不可达,M0 上传必须 `person_confirmed: true`。
-- **无归人纠正/对账**:`correction-NNNN.json` 与 `person_mismatch` 是 M2;但 03-storage-keys 中其 schema 已定义(属存储层规范,一次定死)。
+- **无归人纠正/对账**:`person_mismatch` 是 M2;`correction-NNNN.json` 的 schema 已在 [03 §4](./03-storage-keys.md) 定义并落 `_meta/schemas/`,M0 无写入路径。
 - **journal 事件在 M0 只有 `person_update` 一种**(建档/改档触发)。事件注册表机制必须落地,后续里程碑只加条目。
 
 ## 3. 工程约定(骨架)
@@ -40,6 +42,6 @@
 
 M0 交付的是**第一层(L1)的地基**。所以验收里最重的不是 API 通,而是 ADR-045 的性质在最小场景下成立:
 
-1. 上传一张图后,桶里的每个对象都能在 [04 §1 权威矩阵](../../docs/04-storage-layout.md) 里找到自己的行;
-2. 删掉数据库,仅凭桶重建出等价的 person 与 document 记录(`tools/rebuild-index` 的 M0 最小版);
-3. WORM 对象确实不可覆盖/不可删(验证命令见 04-bucket-config)。
+1. 上传一张图后,桶里的每个对象都能在 [04 §1 权威矩阵](../../docs/04-storage-layout.md) 里找到自己的行(含 `_incoming/`、`_probe/`,矩阵已回写);
+2. 删掉数据库,仅凭桶(+ seed 账号)重建出等价的 person 与 document 记录 —— 等价性按 99 A10 的穷尽字段表,account/person_access 显式在外;
+3. WORM 的真实语义成立:**版本不可销毁** + 应用条件写纪律(versioning 下裸 PUT 仍会产生新版本 —— 验证命令见 04-bucket-config §4)。

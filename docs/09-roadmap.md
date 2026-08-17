@@ -20,6 +20,7 @@
 - [ ] PostgreSQL schema + Drizzle 迁移(见 [03 · 数据模型](./03-data-model.md))
 - [ ] S3 桶创建:**versioning + object lock 必须在建桶时开启**(事后无法补);**不设桶级默认保留期**,按 04 §1 矩阵逐对象上锁(ADR-045)
 - [ ] `_meta/` 自述层落桶:README(布局/回放规则/journal 事件注册表)+ schema 快照 + 注册表快照(ADR-045)
+- [ ] **最小上传链**(presign → 直传 → 登记;capture.json 随登记即写)与 **journal 双写机制**(M0 事件:person_update)—— spec 审核 #001 裁决:M0 验收句要求上传,D1 原则要求 journal 随建档同批(见 specs/m0/)
 - [ ] `packages/storage`:key 生成/解析 + sidecar 序列化 + 往返测试
 - [ ] 账号认证 + `person_access` 授权中间件(**从第一天起所有查询都过这一层**)
 - [ ] 建档 API
@@ -32,13 +33,11 @@
 
 **目标:拍照 → 入库,弱网可用。这一步做完,系统就已经有价值了。**
 
-- [ ] 预签名 URL 直传
-- [ ] `POST /documents` + 幂等键(`client_document_id`)
+- [ ] PWA 侧接入 M0 既有上传链(presign 直传 + `POST /documents` 幂等键)
 - [ ] PWA:拍照(含连拍模式)、PDF/截图/相册导入
 - [ ] **IndexedDB 离线队列 + Service Worker 后台重试**
 - [ ] 上传队列状态 UI(「3 张待上传」)
-- [ ] capture.json(拍摄事实)随上传即写 S3 —— 不等 AI(ADR-045)
-- [ ] **人工层 journal 双写机制**(`people/{slug}/journal/`)—— 与首个人工输入同批上线,此后每个产生人工输入的功能都必须接入(ADR-045,原设计债 D1)
+- [ ] journal 双写扩展到 M1 新增的人工输入(机制已在 M0 落地;此后每个产生人工输入的功能都必须接入,ADR-045 / D1)
 - [ ] 缩略图 / 预览图生成
 - [ ] 文档浏览:按人 → 时间轴 → 文档
 

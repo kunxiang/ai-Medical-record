@@ -41,7 +41,10 @@ L2/L3 是插件:**升级或替换它们时,L1 的任何字节都不需要动;打
 | `_index/manifests/*.jsonl` | L1 清单 | 只追加(条件写) | ✅ | 必带 | 过滤后带 |
 | `_index/decisions/*.jsonl` | 人工(全家共享词表) | 只追加 | ✅ | 必带 | 分类后带(见 §6) |
 | `_index/people.json` / `_index/audit/*.jsonl` | L1 | 重写式 / 只追加 | ❌ / ✅ | 必带 | 过滤后带 |
-| `_meta/**`(README、schema 快照、注册表快照) | 自述 | 只追加 | ❌ | 必带 | 必带 |
+| `_meta/schemas/**`、`_meta/registries/**` | 自述 | 只追加 | ❌ | 必带 | 必带 |
+| `_meta/README.md` | 自述 | 重写式(工具生成) | ❌ | 必带 | 必带 |
+| `_incoming/**`(直传暂存,spec m0-06) | 暂存 | 短命(lifecycle 7 天含非当前版本) | ❌ | 不带 | 不带 |
+| `_probe/**`(启动自检探针,spec m0-04) | 自检 | 重写式;lock-probe 留置 | ❌(lock-probe 例外:最短保留) | 不带 | 不带 |
 | `derived/**`(提取、转写、AI 元数据、缩略图、视图) | **L2** | 随时重写/删除 | **❌ 严禁上锁** | **可丢** | 可丢 |
 
 两条铁律:
@@ -186,13 +189,9 @@ S3 key 支持 UTF-8,中文名对浏览更直观。但:
   "schema_version": "2.0",
   "document_id": "550e8400-e29b-41d4-a716-446655440000",
   "short_id": "d7k2m9",
-  "person": {
-    "slug": "p3f7a2",
-    "name": "张三",
-    "confirmed_by": "capture_ui",
-    "_note": "拍摄现场人工点选的归属(ADR-041)。若事后纠正,见同目录 correction-*.json"
-  },
+  "person": { "slug": "p3f7a2", "name": "张三", "confirmed_by": "capture_ui" },
   "captured_at": "2024-03-15T10:32:11+08:00",
+  "capture_date": "2024-03-15",
   "source": "camera",
   "uploaded_by": "account-uuid",
   "pages": [
@@ -304,7 +303,7 @@ person 表的**全量**离线副本:姓名、生日、性别、血型、**过敏
 
 - **L1 不设任何自动删除规则。** 这是永久档案。被逐对象锁覆盖的版本,生命周期规则也删不掉 —— 这正是期望行为。
 - `derived/**` 可设:非当前版本 30 天清理;180 天未访问转低频 —— 反正能重建。
-- 追加型 JSONL(journal/manifests/decisions)的非当前版本**不清理**(它们未上锁的旧版本是并发事故的取证材料,量极小)。
+- 追加型 JSONL(journal/manifests/decisions)的非当前版本**不清理** —— 每个版本写入时即被逐对象锁覆盖(追加 = 重写整对象 = 新版本新锁),旧版本自然保留,兼作并发事故取证,量极小。
 
 ---
 

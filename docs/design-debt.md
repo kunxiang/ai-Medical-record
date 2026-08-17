@@ -13,4 +13,6 @@
 | D7 | **文档边界组装**:split / merge / move-page 接口;S1 输出边界建议(report_no / 页脚 / 表头变化);幂等撞车处理 | C7 | M2 | 6 张连拍混合单据可事后拆分,S3 布局不受影响 |
 | D8 | **ADR 合入 checklist**:每条新 ADR 合入时 grep 全仓库枚举 / 代码示例 / roadmap / fixtures 同步 | C9 / A F10 | 即刻生效 | 见 docs/README |
 | D9 | **单人导出 bundle 细则**:decisions 的共享词表类/个人相关类逐 decision_type 分类表;bundle schema 进 contracts;manifests 按人过滤回放的实现 | 二轮审核(ADR-045) | M8 前 | 单人导出演练:导出孩子的 bundle,档案完整(含改归进来的文档)且不含他人隐私 |
-| D10 | **`_meta/` 快照自动化**:schema/注册表变更时先落 `_meta` 再上线(CI 强制);`_meta/README.md` 与 04 文档同步机制 | 二轮审核(ADR-045) | M0 | 断言:`_meta/schemas/` 含当前 schema_version |
+| D10 | **`_meta/` 快照自动化**:schema/注册表变更时先落 `_meta` 再上线(CI 强制);`_meta/README.md` 与 04 文档同步机制 | 二轮审核(ADR-045) | M0 | 断言:`_meta/schemas/` 含当前 schema_version(99 B8) |
+| D11 | **系统级审计落点**:权限授予/撤销、文档删除 → `_index/audit/{YYYY-MM}.jsonl`;M0 的 owner 自动授予可从 journal 推导,显式接受 | m0 spec 审核 #001 | M1 | 授权变更在桶内可追溯 |
+| D12 | **凭证生命周期**:JWT 吊销方案(改密码失效旧 token)+ argon2 参数版本标记与迁移路径 | m0 spec 审核 #001 | M1 前 | 改密码后旧 token 失效 |

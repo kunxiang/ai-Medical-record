@@ -406,8 +406,7 @@ GET  /api/v1/exports/:id/download         zip(L1 子集,不含任何 derived)
 | 400 | `validation_failed` | |
 | 400 | `person_confirmation_required` | 未确认归人 |
 | 401 | `unauthenticated` | |
-| 403 | `person_access_denied` | 无该档案权限 |
-| 404 | `not_found` | |
+| 404 | `not_found` | 资源不存在,**或存在但无权访问**(m0 spec 审核裁决:合并进 404,不泄露档案存在性;403 不再使用) |
 | 409 | `duplicate_client_document_id` | 幂等键冲突(返回已有文档) |
 | 409 | `document_immutable` | 试图修改不可变字段 |
 | 413 | `file_too_large` | |

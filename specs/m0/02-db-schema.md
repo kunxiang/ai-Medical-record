@@ -1,8 +1,8 @@
 # M0 Spec · 02 数据库 schema
 
-PostgreSQL 16+,Drizzle 迁移。M0 建 **8 张表**:`account`、`person`、`person_identifier`、`person_access`、`facility`、`encounter`、`document`、`document_page`。字段与 [03 · 数据模型](../../docs/03-data-model.md) §1–3 一致;`facility`/`encounter` 仅建表(M0 无写入路径),为 `document` 的 FK 提供目标,避免后续迁移改 FK。
+PostgreSQL 16+,Drizzle 迁移。M0 建 **10 张表**:`account`、`person`、`person_identifier`、`person_access`、`facility`、`encounter`、`document`、`document_page`、`upload_batch`、`upload_file`。字段与 [03 · 数据模型](../../docs/03-data-model.md) §1–3 一致;`facility`/`encounter` 仅建表(M0 无写入路径),为 `document` 的 FK 提供目标,避免后续迁移改 FK。
 
-M0 **不建**:extraction、observation、normalization_decision、context_*、metric_group、medication、audit_log(随各自里程碑)。
+M0 **不建**:extraction、observation、normalization_decision、context_*、metric_group、medication、audit_log、report_narrative(随各自里程碑)。
 
 ## 1. DDL 级规定(Drizzle 表达,语义按此)
 
@@ -131,6 +131,27 @@ CREATE TABLE document_page (
   capture_order  int NOT NULL,
   UNIQUE (document_id, page_no)
 );
+
+CREATE TABLE upload_batch (                        -- 审核 #001 blocker #1/#4:presign 状态持久化
+  id           uuid PRIMARY KEY,
+  doc_short_id text NOT NULL UNIQUE,               -- ★ 预留即查重,短 ID 冲突消灭在 presign(B-1)
+  person_id    uuid NOT NULL REFERENCES person(id),
+  created_by   uuid NOT NULL REFERENCES account(id),
+  consumed_by_document_id uuid REFERENCES document(id),  -- 防一批被两个 document 引用
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  expires_at   timestamptz NOT NULL                -- created_at + 24h;过期批次由 ③ 惰性拒绝
+);                                                 --   (422 upload_incomplete),无后台清理任务
+
+CREATE TABLE upload_file (
+  id            uuid PRIMARY KEY,                  -- = upload_id
+  batch_id      uuid NOT NULL REFERENCES upload_batch(id),
+  filename      text NOT NULL,                     -- ③ 时落 document.original_filename(首文件)
+  mime_type     text NOT NULL,
+  byte_size     bigint NOT NULL,
+  sha256        text NOT NULL,
+  incoming_key  text NOT NULL UNIQUE,              -- _incoming/{batch_id}/{upload_id}
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
 ```
 
 ## 2. 规定
@@ -140,6 +161,8 @@ CREATE TABLE document_page (
 3. **`report_no` 无唯一约束**(设计债 D3:撞号绝不自动拒收 —— 03 里"建议加唯一约束"的说法已被 D3 推翻,以 D3 为准)。
 4. 迁移**必须**可从零重放:`pnpm db:migrate` 在空库上跑到当前版本;CI 每次从零建。
 5. 所有 FK **不设** `ON DELETE CASCADE` —— 档案系统禁止级联删除,删除必须显式。
+6. `document.status` 的 `uploading`/`uploaded`/`failed`/`needs_person_confirm` 在 M0 建出但**无写入路径**(M0 直落 `ready`,见 06 §2;`[偏差:vs 07 §2 响应示例 uploaded —— M0 无中间态使用场景]`),实现者不得为其发明触发条件。
+7. `person_identifier` 的唯一索引是**跨 person 全局**的 —— 两人不得登记同一 (facility, type, value)。是否符合"家人共用就诊卡"的现实,M1 前确认(review-001 C 档)。
 
 ## 3. 与 03 的已知偏差(审核员重点核对)
 
