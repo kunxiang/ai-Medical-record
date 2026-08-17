@@ -14,3 +14,5 @@
 | D8 | **ADR 合入 checklist**:每条新 ADR 合入时 grep 全仓库枚举 / 代码示例 / roadmap / fixtures 同步 | C9 / A F10 | 即刻生效 | 见 docs/README |
 | D9 | **单人导出 bundle 细则**:decisions 的共享词表类/个人相关类逐 decision_type 分类表;bundle schema 进 contracts;manifests 按人过滤回放的实现 | 二轮审核(ADR-045) | M8 前 | 单人导出演练:导出孩子的 bundle,档案完整(含改归进来的文档)且不含他人隐私 |
 | D10 | **`_meta/` 快照自动化**:schema/注册表变更时先落 `_meta` 再上线(CI 强制);`_meta/README.md` 与 04 文档同步机制 | 二轮审核(ADR-045) | M0 | 断言:`_meta/schemas/` 含当前 schema_version |
+| D11 | **同意证据链**:`person_access` 补同意证据(主体、时间、方式);未成年人档案的监护关系声明与成年转移路径 | 微信小程序合规调研([11 §2.6](./11-wechat-compliance.md)) | M1(建表时) | 任一 person 可回答"谁在何时以何方式同意其健康数据被处理";未成年档案有监护声明 |
+| D12 | **分享链接受控**:强制过期 + 可撤销 + 访问留痕 + 默认不含原件影像 | 微信小程序合规调研([11 §2.7](./11-wechat-compliance.md)) | M7(设计阶段定,不留到实现后) | 已发出的链接可单独撤销;访问有日志;默认视图不含证件号 |
