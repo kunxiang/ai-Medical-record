@@ -1,0 +1,65 @@
+{
+  "_comment": "脱敏回归基准 · 报告 A(2024-08-25,1岁,外科门诊,阴囊专项超声)",
+  "schema_version": "1.0",
+  "document": {
+    "doc_type": "imaging_report",
+    "panel_name": "超声科报告单",
+    "report_no": "2024xxxx206",
+    "visit_no": "24040000xxxx",
+    "facility_name": "某市儿童医院",
+    "department": "外科门诊",
+    "event_time": "2024-08-25T15:43:00+08:00",
+    "event_time_source": "report_time",
+    "reported_on": "2024-08-25",
+    "exam_items": ["阴囊", "双侧睾丸", "附睾", "双侧腹股沟"],
+    "page_count": 1,
+    "embedded_images": 2
+  },
+  "patient": {
+    "name": "测试患儿A",
+    "sex": "male",
+    "age_text": "1岁",
+    "identifiers": [{ "type": "visit_no", "value": "24040000xxxx", "scope": "single_visit" }],
+    "_note": "★ 本报告只有门诊号(单次标识),无登记号 —— 归人不能只靠它"
+  },
+  "narrative": {
+    "findings_text": "双侧睾丸位置、形态正常,大小分别为左侧1.3×0.7×0.6cm,右侧1.3×0.7×0.7cm,实质回声均匀,未见明显实质性占位性回声。右侧阴囊内睾丸周围显示积液回声,向腹股沟管延伸。双侧阴囊内睾丸及附睾回声及实质占位性回声。双侧精索未显示增粗。CDFI:双侧睾丸实质内血流信号未见明显异常。哭闹时左侧腹股沟上段均显示少量积液回声。双侧腹股沟区未显示明显占位性回声。检查过程中双侧腹股沟均未显示明显腹腔内容物向内膨突。CDFI:未显示明显异常血流信号。",
+    "conclusions": [
+      { "text": "右侧精索、睾丸鞘膜积液", "laterality": "right", "tags": ["鞘膜积液", "精索"] },
+      { "text": "左侧鞘状突未闭",         "laterality": "left",  "tags": ["鞘状突未闭"] }
+    ],
+    "recommendation": null,
+    "technique_note": "含「哭闹时」诱发观察 —— 覆盖范围记录的关键依据"
+  },
+  "observations": [
+    {
+      "local_name": "左侧睾丸大小", "concept_code": "TESTIS_SIZE", "body_site": "testis.left",
+      "value_dimensions": { "l": 1.3, "w": 0.7, "h": 0.6, "unit": "cm" },
+      "value_num": null, "unit_raw": "cm",
+      "ref_low": null, "ref_high": null, "abnormal_flag": null,
+      "result_kind": "measured"
+    },
+    {
+      "local_name": "右侧睾丸大小", "concept_code": "TESTIS_SIZE", "body_site": "testis.right",
+      "value_dimensions": { "l": 1.3, "w": 0.7, "h": 0.7, "unit": "cm" },
+      "value_num": null, "unit_raw": "cm",
+      "ref_low": null, "ref_high": null, "abnormal_flag": null,
+      "result_kind": "measured"
+    }
+  ],
+  "derived_observations": [
+    {
+      "local_name": "左侧睾丸估算体积", "concept_code": "TESTIS_VOLUME", "body_site": "testis.left",
+      "value_num": 0.286, "unit_raw": "cm3",
+      "is_derived": true, "derived_formula": "ellipsoid-0.5236",
+      "_note": "★ 报告未给体积,由三维尺寸补算,使其与 2026 年报告可比"
+    },
+    {
+      "local_name": "右侧睾丸估算体积", "concept_code": "TESTIS_VOLUME", "body_site": "testis.right",
+      "value_num": 0.334, "unit_raw": "cm3",
+      "is_derived": true, "derived_formula": "ellipsoid-0.5236"
+    }
+  ],
+  "pii_dropped": [],
+  "_expected_ref_ranges": "全部为 null —— 影像报告不提供参考区间,系统不得做正常/异常暗示"
+}

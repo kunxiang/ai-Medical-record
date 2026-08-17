@@ -181,6 +181,87 @@ const LabReportSchema = z.object({
 | **图形区域** | 血常规第 2 页有 PLT / RBC / DIFF / WNB 直方图与散点图 —— **识别为图形,不试图数值化**,原图保留即可 |
 | **无参考区间的行** | 体温、吸氧浓度、TCO₂ 等本就没有区间,`ref_low`/`ref_high` 留空,**不要从别处借** |
 
+### ⚠️ PII 最小化提取
+
+> **对档案价值为零、但泄露风险高的字段,识别后主动丢弃,不写入数据库。**
+
+真实案例:化验单上没有电话,**输液单上印着家长手机号**。这类字段对长期病历archive 毫无价值,却是最敏感的个人信息。
+
+| 字段 | 处理 |
+|---|---|
+| 手机号 / 座机 | 识别 → **丢弃**,不输出 |
+| 身份证号 | 识别 → **丢弃** |
+| 家庭住址 | 识别 → **丢弃** |
+| 医保卡号 / 银行卡号 | 识别 → **丢弃** |
+| 姓名、性别、年龄、院内标识 | 保留(归人必需) |
+
+原图里当然仍有这些信息 —— 但那是不可变原件,不进入结构化层、不进入全文索引、不进入 embedding。
+
+prompt 中显式列出 `pii_drop_list`,并在回归集中加入验证用例:**输出里出现手机号即判定失败**。
+
+### 影像 / 叙述型报告的提取
+
+与化验单走不同的 schema。产出四块:
+
+```ts
+const ImagingReportSchema = z.object({
+  exam_items: z.array(z.string()),        // ★ 检查覆盖范围,见下
+  findings_text: z.string(),              // 检查所见(叙述段,原文)
+  conclusions: z.array(z.object({         // ★ 结论逐条,原文不改写
+    text: z.string(),
+    laterality: z.enum(['left','right','bilateral']).nullable(),
+    tags: z.array(z.string()),            // 额外加的检索标签
+  })),
+  recommendation: z.string().nullable(),  // 建议
+  measurements: z.array(z.object({        // 可纵向追踪的测量值
+    local_name: z.string(),
+    body_site: z.string().nullable(),
+    dimensions: z.object({
+      l: z.number(), w: z.number(), h: z.number(), unit: z.string(),
+    }).nullable(),
+    value_num: z.number().nullable(),
+    unit_raw: z.string().nullable(),
+  })),
+});
+```
+
+**硬性要求:**
+
+1. **结论逐条原文保留,不改写、不归一、不合并。** 「未见明显异常」≠「正常」;「未显示明显占位性回声」是规范表述,改写即失真。
+2. **`exam_items` 必须提取。** `@@` 是 HIS 字段分隔符,拆成数组:
+   `胃肠道及腹膜腔扫查超声【胃及十二指肠@@阑尾及系膜淋巴结@@下消化道】阴囊、双侧睾丸、附睾超声`
+   → `["胃及十二指肠","阑尾及系膜淋巴结","下消化道","阴囊","双侧睾丸","附睾"]`
+3. **测量值带解剖部位。** 左右侧是两条独立时间序列。
+4. **报告内嵌的超声/影像截图不解读**,与血常规直方图同样处理 —— 识别为图像区域,原图保留。
+
+### 输液单 / 注射单的提取
+
+```ts
+const InfusionOrderSchema = z.object({
+  groups: z.array(z.object({
+    group_no: z.number(),
+    total_volume_ml: z.number().nullable(),
+    route: z.string(),                    // 静滴 / 静脉续滴
+    frequency_raw: z.string(),            // ★ 原文,不解析
+    items: z.array(z.object({
+      name_raw: z.string(),               // ★ 含厂家、集采批次的原文
+      generic_name: z.string().nullable(),// 剥离采购信息
+      concentration_pct: z.number().nullable(),
+      dose_raw: z.string(),
+    })),
+  })),
+  charges: z.array(z.object({ item: z.string(), amount: z.number() })).nullable(),
+  handwritten_annotations: z.array(z.string()),  // 低置信度,不进结构化字段
+});
+```
+
+**要点:**
+
+- `name_raw` 保留 `5%葡萄糖注射液(科伦250ml,23年集采)` 全文;`generic_name` 剥离为 `葡萄糖`
+- 剂量单位混用(`0.15克` / `50毫克` / `250毫升`),交给 `packages/medical/units/dose` 归一,**不在 prompt 里换算**
+- 频次中英混排(`静滴 ONCE 1天`)**原文保留,不解析**
+- 手写标记(如排队号)标 `handwritten_annotations`,低置信度,不参与任何结构化字段
+
 ### 多页报告的页序
 
 ⚠️ **页序必须从页脚的「第 N 页,共 M 页」解析,绝不能依赖拍摄顺序。**
@@ -243,6 +324,17 @@ Stage 2 之前:按 page_no 重排,再合并为一次提取
 | `egfr_creatinine` | 报告的 eGFR 与从肌酐算出的一致 | ±10% |
 | `ref_range_sanity` | 参考区间下限 < 上限,且数值量级与区间同级 | 硬性 |
 | `unit_magnitude` | 数值与该指标常见量级相差 > 10 倍 | 标记 |
+
+#### 影像测量
+
+| 规则 | 校验式 | 容差 |
+|---|---|---|
+| **`ellipsoid_volume`** ★ | 估算体积 = 0.5236 × L × W × H | ±5% |
+| `dimension_order` | 三维中最大者应等于报告标注的「最大径」 | 硬性 |
+
+> ★ 真实数据实测:左 1.4×0.6×0.9×0.5236 = **0.3958**(报告 0.39 ✓);右 1.3×0.7×0.8×0.5236 = **0.3812**(报告 0.37,差 3%)。
+>
+> **这条规则的额外价值:给没给体积的旧报告补算,让历史数据可比。** 2024 年那份只有三维尺寸,套同一公式即可与 2026 年的报告体积落到同一根轴上 —— 派生值置 `is_derived = true`、`derived_formula = ellipsoid-0.5236`。
 
 #### 跨报告(同一 encounter)
 

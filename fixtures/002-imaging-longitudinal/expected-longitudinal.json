@@ -1,0 +1,73 @@
+{
+  "_comment": "纵向对比的期望行为。这是本用例的核心断言 —— 比单份提取更重要。",
+  "schema_version": "1.0",
+  "person_slug": "pTEST1",
+  "timeline": [
+    { "event_time": "2024-08-25T15:43:00+08:00", "doc": "A", "department": "外科门诊",     "intent": "阴囊专项检查" },
+    { "event_time": "2026-08-17T16:54:43+08:00", "doc": "B", "department": "内科急诊(龙华)", "intent": "腹部超声,阴囊顺带" }
+  ],
+
+  "coverage_diff": {
+    "only_in_A": ["双侧腹股沟", "哭闹诱发观察"],
+    "only_in_B": ["胃及十二指肠", "阑尾及系膜淋巴结", "下消化道"],
+    "in_both":   ["阴囊", "双侧睾丸", "附睾"],
+    "expected_ui_notice": "两次检查覆盖范围不同:本次不包含腹股沟及诱发试验"
+  },
+
+  "conclusion_comparison": {
+    "expected_behavior": "并列呈现 + 显式标注覆盖范围差异",
+    "items": [
+      {
+        "tag": "鞘膜积液",
+        "A": "右侧精索、睾丸鞘膜积液",
+        "B": "右侧睾丸鞘膜积液",
+        "covered_in_both": true,
+        "expected_render": "两次均有记录,并列呈现原文"
+      },
+      {
+        "tag": "鞘状突未闭",
+        "A": "左侧鞘状突未闭",
+        "B": null,
+        "covered_in_both": false,
+        "expected_render": "本次检查项目不包含腹股沟诱发试验,该项无本次数据",
+        "FORBIDDEN_renders": [
+          "左侧鞘状突未闭已消失",
+          "左侧鞘状突未闭已好转",
+          "较前改善",
+          "任何对差异的解读"
+        ],
+        "_note": "★ 本用例最重要的断言。渲染成'已消失'即判定失败。"
+      }
+    ]
+  },
+
+  "measurement_series": [
+    {
+      "concept_code": "TESTIS_VOLUME", "body_site": "testis.left", "unit": "cm3",
+      "points": [
+        { "at": "2024-08-25", "value": 0.286, "is_derived": true,  "derived_formula": "ellipsoid-0.5236" },
+        { "at": "2026-08-17", "value": 0.39,  "is_derived": false, "source": "report" }
+      ],
+      "expected_annotation": "2024 年数值由三维尺寸按椭球公式补算,报告原文未提供体积",
+      "FORBIDDEN": ["任何关于增长是否正常的判断", "参考区间", "正常/异常标记"]
+    },
+    {
+      "concept_code": "TESTIS_VOLUME", "body_site": "testis.right", "unit": "cm3",
+      "points": [
+        { "at": "2024-08-25", "value": 0.334, "is_derived": true,  "derived_formula": "ellipsoid-0.5236" },
+        { "at": "2026-08-17", "value": 0.37,  "is_derived": false, "source": "report" }
+      ]
+    }
+  ],
+
+  "person_linking": {
+    "expected": "两份报告归为同一人",
+    "signals": [
+      { "doc": "B", "type": "patient_id", "scope": "long_term",   "strength": "strong",
+        "note": "与用例 001/003 的登记号相同" },
+      { "doc": "A", "type": "visit_no",   "scope": "single_visit", "strength": "weak",
+        "note": "★ 门诊号只对单次就诊有效,不可作为归人依据" }
+    ],
+    "expected_behavior": "报告 A 缺长期标识 → 必须走人工归人确认,不得靠姓名+年龄自动归并"
+  }
+}

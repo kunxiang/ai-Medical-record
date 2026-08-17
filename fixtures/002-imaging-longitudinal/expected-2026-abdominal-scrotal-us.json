@@ -1,0 +1,74 @@
+{
+  "_comment": "脱敏回归基准 · 报告 B(2026-08-17,3岁,内科急诊,腹部超声顺带阴囊)",
+  "schema_version": "1.0",
+  "document": {
+    "doc_type": "imaging_report",
+    "panel_name": "超声科报告单",
+    "report_no": "US26xxxx187",
+    "facility_name": "某市儿童医院",
+    "department": "内科急诊(龙华)",
+    "event_time": "2026-08-17T16:54:43+08:00",
+    "event_time_source": "report_time",
+    "reported_on": "2026-08-17",
+    "exam_items_raw": "胃肠道及腹膜腔扫查超声【胃及十二指肠@@阑尾及系膜淋巴结@@下消化道】阴囊、双侧睾丸、附睾超声",
+    "exam_items": ["胃及十二指肠", "阑尾及系膜淋巴结", "下消化道", "阴囊", "双侧睾丸", "附睾"],
+    "verified_by_name": "医师乙",
+    "page_count": 1,
+    "embedded_images": 2,
+    "_note": "★ @@ 是 HIS 字段分隔符,必须拆成数组"
+  },
+  "patient": {
+    "name": "测试患儿A",
+    "sex": "male",
+    "age_text": "3岁",
+    "identifiers": [{ "type": "patient_id", "value": "MASKED-001", "scope": "long_term" }],
+    "_note": "登记号与用例 001、003 相同 —— 归人靠长期标识"
+  },
+  "narrative": {
+    "findings_text": "双侧睾丸位置、切面形态正常,大小分别为左侧1.4cm×0.6cm×0.9cm(估算体积0.39cm3),右侧1.3cm×0.7cm×0.8cm(估算体积0.37cm3),实质回声均匀,未见明显实质性占位性回声。双侧阴囊内未见明显异常。双侧阴囊内睾丸周围显示积液回声,最大横径0.9cm。双侧精索未显示增粗。CDFI:双侧睾丸实质内血流信号未见明显异常。胃、肠管未见明显扩张。肠管壁未见明显增厚,肠蠕动正常。右下腹未见明显增大阑尾回声。网膜、系膜未显示明显增厚。肠系膜未显示异常增大淋巴结回声。腹腔未见明显包块及游离积液声像。CDFI:未显示明显异常血流信号。",
+    "conclusions": [
+      { "text": "右侧睾丸鞘膜积液",                     "laterality": "right", "tags": ["鞘膜积液"] },
+      { "text": "胃、肠管声像未见明显异常",             "laterality": null,    "tags": ["胃肠"] },
+      { "text": "腹腔未见明显增大阑尾及异常淋巴结声像", "laterality": null,    "tags": ["阑尾", "淋巴结"] },
+      { "text": "腹腔未见明显包块及游离积液声像",       "laterality": null,    "tags": ["腹腔"] }
+    ],
+    "recommendation": "必要时复查"
+  },
+  "observations": [
+    {
+      "local_name": "左侧睾丸大小", "concept_code": "TESTIS_SIZE", "body_site": "testis.left",
+      "value_dimensions": { "l": 1.4, "w": 0.6, "h": 0.9, "unit": "cm" },
+      "value_num": null, "unit_raw": "cm",
+      "ref_low": null, "ref_high": null, "result_kind": "measured"
+    },
+    {
+      "local_name": "左侧睾丸估算体积", "concept_code": "TESTIS_VOLUME", "body_site": "testis.left",
+      "value_num": 0.39, "unit_raw": "cm3",
+      "ref_low": null, "ref_high": null, "result_kind": "calculated",
+      "_note": "报告直接给出;可用 ellipsoid_volume 规则校验"
+    },
+    {
+      "local_name": "右侧睾丸大小", "concept_code": "TESTIS_SIZE", "body_site": "testis.right",
+      "value_dimensions": { "l": 1.3, "w": 0.7, "h": 0.8, "unit": "cm" },
+      "value_num": null, "unit_raw": "cm",
+      "ref_low": null, "ref_high": null, "result_kind": "measured"
+    },
+    {
+      "local_name": "右侧睾丸估算体积", "concept_code": "TESTIS_VOLUME", "body_site": "testis.right",
+      "value_num": 0.37, "unit_raw": "cm3",
+      "ref_low": null, "ref_high": null, "result_kind": "calculated"
+    },
+    {
+      "local_name": "睾丸周围积液最大横径", "concept_code": "HYDROCELE_MAX_DIAM", "body_site": "scrotum",
+      "value_num": 0.9, "unit_raw": "cm",
+      "ref_low": null, "ref_high": null, "result_kind": "measured"
+    }
+  ],
+  "checks": [
+    { "rule": "ellipsoid_volume", "body_site": "testis.left",
+      "formula": "0.5236*L*W*H", "computed": 0.3958, "reported": 0.39, "diff_pct": 1.5, "passed": true },
+    { "rule": "ellipsoid_volume", "body_site": "testis.right",
+      "formula": "0.5236*L*W*H", "computed": 0.3812, "reported": 0.37, "diff_pct": 3.0, "passed": true }
+  ],
+  "pii_dropped": []
+}

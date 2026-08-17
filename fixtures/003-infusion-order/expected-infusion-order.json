@@ -1,0 +1,102 @@
+{
+  "_comment": "脱敏回归基准 · 输液单(2026-08-17,与用例 001/002 同属一次急诊)",
+  "schema_version": "1.0",
+  "document": {
+    "doc_type": "infusion_order",
+    "panel_name": "输液单",
+    "facility_name": "某市儿童医院(龙华院区)",
+    "department": "内科急诊(龙华)",
+    "visit_no": "2503500030xx",
+    "clinical_diagnosis": "呕吐查因",
+    "_clinical_diagnosis_note": "★ 为开单/计费服务的简化标签。家长描述本次主因还包括腹泻 → 情境问答须保留补充确认环节",
+    "event_time": "2026-08-17T18:02:44+08:00",
+    "event_time_source": "print_time",
+    "page_count": 1
+  },
+  "patient": {
+    "name": "测试患儿A",
+    "sex": "male",
+    "age_text": "3岁0月",
+    "identifiers": [{ "type": "patient_id", "value": "MASKED-001", "scope": "long_term" }]
+  },
+
+  "pii_dropped": [
+    { "field": "phone", "reason": "对档案价值为零、泄露风险高" }
+  ],
+  "_pii_assertion": "★ 提取输出中出现任何手机号即判定失败",
+
+  "medications": [
+    {
+      "kind": "administered", "administration_group": 1, "sequence": 1,
+      "group_volume_ml": 250, "route": "静滴", "frequency_raw": "ONCE 1天",
+      "administered_at": "2026-08-17T18:02:00+08:00",
+      "name_raw": "5%葡萄糖注射液(科伦250ml,23年集采)", "generic_name": "葡萄糖",
+      "concentration_pct": 5, "dose_raw": "250毫升", "dose_value": 250, "dose_unit": "mL"
+    },
+    {
+      "kind": "administered", "administration_group": 1, "sequence": 2,
+      "group_volume_ml": 250, "route": "静滴", "frequency_raw": "ONCE 1天",
+      "administered_at": "2026-08-17T18:02:00+08:00",
+      "name_raw": "10%氯化钠注射液(兴华,23年集采)", "generic_name": "氯化钠",
+      "concentration_pct": 10, "dose_raw": "10毫升", "dose_value": 10, "dose_unit": "mL",
+      "solute_mass_g": 1.0, "_solute_note": "10% × 10 mL = 1 g NaCl"
+    },
+    {
+      "kind": "administered", "administration_group": 1, "sequence": 3,
+      "group_volume_ml": 250, "route": "静滴", "frequency_raw": "ONCE 1天",
+      "administered_at": "2026-08-17T18:02:00+08:00",
+      "name_raw": "15%氯化钾注射液(25年国采)", "generic_name": "氯化钾",
+      "concentration_pct": 15, "dose_raw": "3毫升", "dose_value": 3, "dose_unit": "mL",
+      "solute_mass_g": 0.45, "_solute_note": "15% × 3 mL = 0.45 g KCl —— ★ 直接影响后续血钾"
+    },
+    {
+      "kind": "administered", "administration_group": 1, "sequence": 4,
+      "group_volume_ml": 250, "route": "静滴", "frequency_raw": "ONCE 1天",
+      "administered_at": "2026-08-17T18:02:00+08:00",
+      "name_raw": "维生素B6注射液(广州,23年集采)", "generic_name": "维生素B6",
+      "concentration_pct": null, "dose_raw": "50毫克", "dose_value": 50, "dose_unit": "mg"
+    },
+    {
+      "kind": "administered", "administration_group": 2, "sequence": 1,
+      "group_volume_ml": 100, "route": "静脉续滴", "frequency_raw": "ONCE 1天",
+      "administered_at": "2026-08-17T18:02:00+08:00",
+      "name_raw": "0.9%氯化钠注射液(川100ml,23年集采)", "generic_name": "氯化钠",
+      "concentration_pct": 0.9, "dose_raw": "100毫升", "dose_value": 100, "dose_unit": "mL"
+    },
+    {
+      "kind": "administered", "administration_group": 2, "sequence": 2,
+      "group_volume_ml": 100, "route": "静脉续滴", "frequency_raw": "ONCE 1天",
+      "administered_at": "2026-08-17T18:02:00+08:00",
+      "name_raw": "西咪替丁注射液(福州海王)", "generic_name": "西咪替丁",
+      "concentration_pct": null, "dose_raw": "0.15克", "dose_value": 150, "dose_unit": "mg",
+      "_dose_note": "★ 0.15 克 → 150 毫克。同一张单上 mg 与 g 混用,必须归一"
+    }
+  ],
+
+  "charges": [
+    { "item": "门诊静脉输液",             "unit_price": 28.34, "qty": "1组", "amount": 28.34 },
+    { "item": "静脉注射连续输液(第2组)", "unit_price": 2.47,  "qty": "1组", "amount": 2.47 }
+  ],
+  "_charges_note": "记录但不建模 —— 存入 extraction.structured,不建费用表",
+
+  "handwritten_annotations": [
+    { "text": "25", "confidence": 0.4, "note": "疑为排队号;低置信度,不进结构化字段" }
+  ],
+
+  "execution_signatures": {
+    "doctor": true, "check_nurse": false, "inject_nurse": true, "round_nurse": false,
+    "_note": "只记录有无,不解析签名内容"
+  },
+
+  "cross_document_context": {
+    "encounter_linked_docs": ["001-blood-gas", "001-cbc-crp", "002-2026-us"],
+    "linked_by": "patient_id + same_day + same_facility",
+    "timeline": [
+      { "at": "16:54", "event": "超声报告",   "source": "report_time" },
+      { "at": "17:07", "event": "采血",       "source": "collected_at" },
+      { "at": "18:02", "event": "开始输液",   "source": "print_time" }
+    ],
+    "expected_annotation": "血气采样(17:07)早于本次输液(18:02)—— 中性陈述,不解读影响方向",
+    "FORBIDDEN": ["因此钾偏低不可信", "输液后应复查", "任何对影响方向的解读"]
+  }
+}

@@ -42,7 +42,11 @@
 
 | 用例 | 覆盖点 |
 |---|---|
-| [001-pediatric-emergency](./fixtures/001-pediatric-emergency/) | 儿科急诊血气 + 血常规;儿科参考区间、跨仪器同指标冲突、多页排序、指标限定词 |
+| [001-pediatric-emergency](./fixtures/001-pediatric-emergency/) | 血气 + 血常规;儿科参考区间、跨仪器同指标冲突、多页排序、指标限定词 |
+| [002-imaging-longitudinal](./fixtures/002-imaging-longitudinal/) | 相隔两年的两份超声;叙述型报告、**结论"消失"≠问题消失**、解剖部位维度、体积派生 |
+| [003-infusion-order](./fixtures/003-infusion-order/) | 输液单;已执行给药 vs 处方、药物剂量单位、**PII 最小化**、跨文档时间轴 |
+
+> 001/002/003 属于同一次急诊,合起来还原一次完整就诊(超声 → 采血 → 输液);002 另含一份 2024 年旧报告,构成第一个纵向用例。
 
 ## 状态
 

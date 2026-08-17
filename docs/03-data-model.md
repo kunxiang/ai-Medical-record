@@ -144,6 +144,9 @@ PK `(account_id, person_id)`
 | `reported_on` | date nullable | **报告日期** |
 | `collected_at` | timestamptz nullable | **采集时刻**(精确到分)—— 见下方说明 |
 | `received_at` / `tested_at` / `verified_at` | timestamptz nullable | 接收 / 检验 / 审核时间 |
+| `event_time` | timestamptz nullable | **统一时间轴用的事件时刻** —— 见下方 ⚠️ |
+| `event_time_source` | text nullable | 该时刻取自哪个字段 |
+| `exam_items` | jsonb nullable | 检查项目 / 覆盖范围(影像专用)—— 见下方 ⚠️ |
 | `facility_id` | uuid FK nullable | 冗余自 encounter,便于直接筛选 |
 | `report_no` | text nullable | **报告编号** —— 见下方说明 |
 | `accession_no` | text nullable | 流水号 |
@@ -165,15 +168,47 @@ PK `(account_id, person_id)`
 |---|---|
 | **`report_no`(报告编号)** | 中国医院报告普遍印有唯一报告编号(如 `926081701634`)。这是**天然的幂等键** —— 同一份单据被重复拍照上传时可自动去重,比 sha256 更可靠(重拍一张照片 sha256 就变了,报告编号不变)。建议加唯一约束 `(facility_id, report_no)`。 |
 | **`collected_at`(采集时刻)** | 报告上印着精确到分钟的采集时间。**同一次抽血产生的多份报告,采集时刻完全相同** —— 这是 `encounter` 自动归组最强的信号,比"同日同院"精确得多。 |
-| **`clinical_diagnosis`(临床诊断)** | 报告单上直接印着申请时的临床诊断(如 `呕吐查因`)。**不需要问用户** —— 问答模板里对应的问题应降级为"确认 / 补充",而不是从零提问。 |
+| **`clinical_diagnosis`(临床诊断)** | 报告单上直接印着申请时的临床诊断(如 `呕吐查因`)。⚠️ **这是为开单/计费服务的简化标签,不是完整临床图景** —— 真实案例中单据印「呕吐查因」,而家长描述本次就诊主因还包括腹泻。正确做法是**预填 + 让用户补充确认**,不是省掉提问。 |
+
+#### ⚠️ `event_time` —— 跨文档类型的时间轴对齐
+
+同一次就诊里,不同文档的"事件时刻"来自**不同字段,语义不同**,不能直接比大小:
+
+| doc_type | event_time 取自 | 真实案例(同一次急诊) |
+|---|---|---|
+| `lab_report` | `collected_at`(采集时刻) | 17:07 |
+| `imaging_report` | 报告时间(检查实际更早) | 16:54 |
+| `infusion_order` | 打印时间 ≈ 开始给药 | 18:02 |
+| `prescription` | 开具时间 | — |
+
+排序后可知实际顺序是 **先超声 → 再抽血 → 再输液**。
+
+`event_time_source` 必须记录取自哪个字段,否则时间轴的精度无从判断 —— 影像的"报告时间"晚于实际检查,而化验的"采集时刻"就是事件本身。
+
+#### ⚠️ `exam_items` —— 影像报告的覆盖范围
+
+影像报告的**检查项目栏**决定了这次查了什么。真实案例:
+
+```
+胃肠道及腹膜腔扫查超声【胃及十二指肠@@阑尾及系膜淋巴结@@下消化道】阴囊、双侧睾丸、附睾超声
+```
+
+`@@` 是 HIS 的字段分隔符,提取时拆成数组:
+
+```json
+["胃及十二指肠", "阑尾及系膜淋巴结", "下消化道", "阴囊", "双侧睾丸", "附睾"]
+```
+
+**为什么必须存:** 影像结论在两次检查间"消失",可能只是这次没查那个部位。不记录覆盖范围,系统会把"未提及"渲染成"已消失"。详见 [ADR-028](./adr.md#adr-028--影像结论的消失不等于问题消失)。
 
 #### `doc_type` 取值
 
 | 值 | 中文 | 提取重点 |
 |---|---|---|
 | `lab_report` | 化验单 | 表格化数值,提取价值最高 |
-| `imaging_report` | 影像报告(CT/MRI/超声/X 光) | **结论段** + 关键测量值;描述段全文索引 |
-| `prescription` | 处方 / 用药清单 | 药名、剂量、频次 —— 解释化验值异常的一半答案在这里 |
+| `imaging_report` | 影像报告(CT/MRI/超声/X 光) | **结论段** + 关键测量值 + **检查覆盖范围**;描述段全文索引 |
+| `prescription` | 处方 | 计划给药。药名、剂量、频次 |
+| `infusion_order` | **输液单 / 注射单** | **已执行给药**。分组、途径、给药时刻 —— 见下方说明 |
 | `discharge_summary` | 出院小结 | 诊断、治疗经过 |
 | `outpatient_note` | 门诊病历 | 主诉、诊断 |
 | `pathology` | 病理报告 | **临床权重最高,数量最少,绝不能丢** |
@@ -203,6 +238,37 @@ PK `(account_id, person_id)`
 > ⚠️ **`page_no` 必须从页脚的「第 N 页,共 M 页」解析,不能等同于拍摄顺序。**
 > 真实场景中用户经常先拍到第 2 页(纸是折叠的、翻页顺序反了)。而多页报告的项目编号是**跨页连续**的(第 1 页 NO 1–20,第 2 页 NO 21–27),顺序错了会导致提取结果错乱。
 > `capture_order` 单独保留,用于排查上传问题。
+
+---
+
+## 3b. 叙述型报告
+
+化验单是表格 → `observation` 行。**影像报告、病理报告、出院小结是叙述文本 + 结论列表**,结构完全不同。
+
+### `report_narrative` — 1:1 挂在 document 上
+
+适用 `doc_type ∈ (imaging_report, pathology, discharge_summary, outpatient_note)`。
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `document_id` | uuid PK FK | |
+| `findings_text` | text | 「检查所见」/「镜下所见」—— 叙述段,全文索引 |
+| `impression_text` | text | 「超声诊断」/「病理诊断」原文块 |
+| `conclusions` | jsonb | **结论逐条数组** —— 见下方 ⚠️ |
+| `recommendation` | text nullable | 「建议」,如 `必要时复查` |
+| `technique` | text nullable | 检查技术 / 造影剂 / 机器型号 |
+| `comparison_note` | text nullable | 报告里提到的与既往对比 |
+
+```json
+"conclusions": [
+  { "text": "右侧睾丸鞘膜积液", "tags": ["鞘膜积液"], "laterality": "right" },
+  { "text": "胃、肠管声像未见明显异常", "tags": ["胃肠"], "laterality": null }
+]
+```
+
+> ⚠️ **结论必须逐条原文保留,不改写、不归一、不做语义解析。**
+> 中文影像报告的措辞有规范含义:「未见明显异常」≠「正常」,「未显示明显占位性回声」是特定表述。
+> `tags` 与 `laterality` 是**额外**加上去用于检索与分组的,原文永远是主体。
 
 ---
 
@@ -252,6 +318,8 @@ PK `(account_id, person_id)`
 | `value_num` | numeric nullable | 可解析的数值 |
 | `comparator` | enum(`=`,`<`,`>`,`<=`,`>=`) nullable | 处理 `<0.01` 这类结果 |
 | `value_text` | text nullable | 定性结果:阴性/阳性/+/++ |
+| `value_dimensions` | jsonb nullable | **多维测量**,如 `{"l":1.4,"w":0.6,"h":0.9,"unit":"cm"}`。见下方 ⚠️ |
+| `body_site` | text nullable | **解剖部位**,如 `testis.left`。见下方 ⚠️ |
 | `unit_raw` | text | 报告上的原始单位 |
 | **标准化(派生)** | | |
 | `value_si` | numeric nullable | 换算到规范单位后的值 |
@@ -320,6 +388,35 @@ PK `(account_id, person_id)`
 | `calculated` | 仪器由其他值计算 | ⚠️ 可进,但**同一指标存在实测值时优先用实测** |
 | `input_parameter` | 操作者输入的参数 | ❌ 不进趋势,仅作上下文 |
 
+#### ⚠️ 4. `body_site` 与 `value_dimensions` —— 影像测量值
+
+**影像报告里也有可纵向追踪的数值**,但形态与化验单完全不同。真实案例(同一儿童,相隔两年):
+
+| | 2024-08-25 | 2026-08-17 |
+|---|---|---|
+| 左睾丸 | 1.3 × 0.7 × 0.6 cm | 1.4 × 0.6 × 0.9 cm(报告估算体积 0.39 cm³) |
+| 右睾丸 | 1.3 × 0.7 × 0.7 cm | 1.3 × 0.7 × 0.8 cm(报告估算体积 0.37 cm³) |
+
+**两个新问题:**
+
+1. **测量值是三维的** —— 标量字段装不下 → `value_dimensions`
+2. **解剖部位是新维度** —— 左睾丸与右睾丸是**两条独立的时间序列**。化验单没有这个概念,影像报告普遍有(左/右、上/下、各叶各段)
+
+```
+唯一性:(document_id, concept_code, qualifier, body_site)
+```
+
+**派生让历史可比:** 2024 那份没给体积,但椭球公式 `V = 0.5236 × L × W × H` 在 2026 那份上验证成立(左 0.3958 vs 报告 0.39 ✓),因此可以给 2024 补算,使两个时间点落到同一根轴上:
+
+| | 2024(派生) | 2026(报告) |
+|---|---|---|
+| 左 | 0.286 cm³ | 0.39 cm³ |
+| 右 | 0.334 cm³ | 0.37 cm³ |
+
+派生值置 `is_derived = true`、`derived_formula = ellipsoid-0.5236`。
+
+> ⚠️ **影像测量值没有参考区间。** 报告本身不给 —— 是否正常需按年龄生长曲线判断,而那超出系统职责。`ref_low`/`ref_high` 全部为 null,系统**绝不对影像测量值做任何正常/异常暗示**。
+
 ---
 
 **重跑保护:** 当 `review_status ∈ (confirmed, corrected)` 时,重跑提取**不覆盖**该记录 —— 人工修正永远优先于机器提取。
@@ -368,16 +465,70 @@ PK `(account_id, person_id)`
 
 ### `medication`
 
-| 字段 | 类型 |
-|---|---|
-| `id` | uuid PK |
-| `person_id` | uuid FK |
-| `name` | text |
-| `generic_name` | text nullable |
-| `dose` / `frequency` / `route` | text |
-| `started_on` / `ended_on` | date nullable |
-| `source_document_id` | uuid FK nullable |
-| `note` | text |
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `id` | uuid PK | |
+| `person_id` | uuid FK | |
+| `kind` | enum(`prescribed`,`administered`) | **计划给药 vs 已执行给药** |
+| `name_raw` | text | **报告原文** —— 含厂家、规格、集采批次 |
+| `generic_name` | text nullable | 剥离采购信息后的通用名 |
+| `dose_raw` | text | 原文剂量,如 `0.15克`、`50毫克`、`250毫升` |
+| `dose_value` / `dose_unit` | numeric / text nullable | 归一后 |
+| `concentration_pct` | numeric nullable | 浓度,如 `10`(表示 10%) |
+| `frequency_raw` | text | **原文保留**,如 `ONCE`、`1天`、`每日一次` |
+| `route` | text | `静滴` / `静脉续滴` / `口服` / `肌注` |
+| `administration_group` | int nullable | **输液分组**,见下方 ⚠️ |
+| `group_volume_ml` | numeric nullable | 该组总量 |
+| `sequence` | int nullable | 组内顺序 / 组间先后 |
+| `administered_at` | timestamptz nullable | **给药时刻(精确到分)** |
+| `started_on` / `ended_on` | date nullable | 长期用药用 |
+| `source_document_id` | uuid FK nullable | |
+| `note` | text | |
+
+#### ⚠️ 输液单不是处方
+
+| | `prescribed`(处方) | `administered`(输液单/注射单) |
+|---|---|---|
+| 语义 | 计划给药 | **已执行给药** |
+| FHIR | `MedicationRequest` | `MedicationAdministration` |
+| 特有 | — | 分组、途径、护士执行签名 |
+
+真实案例(一次急诊输液):
+
+```
+第1组(250 mL,静滴):
+  5% 葡萄糖注射液      250 mL
+  10% 氯化钠注射液      10 mL
+  15% 氯化钾注射液       3 mL
+  维生素B6注射液        50 mg
+第2组(100 mL,静脉续滴):
+  0.9% 氯化钠注射液    100 mL
+  西咪替丁注射液       0.15 g
+```
+
+**同组药物混在同一袋液体里输**,共享给药时刻与速度。扁平结构装不下 → `administration_group` + `sequence`。
+
+#### ⚠️ 这是"分析前变异"的最强形态
+
+同一次急诊中,血气采样在 17:07,输液单打印于 18:02 —— **补钾补钠补糖之后再抽血,电解质与血气结果与输液前不可同日而语**。
+
+这比「最近在吃什么药」强得多:是「**两小时前静脉输了什么**」。因此:
+
+- `administered_at` 必须精确到分,不能只有日期
+- 趋势图上输液事件需与检验时间点**对齐显示**
+- 情境问答新增「这次有没有输液/打针?」;若同一 encounter 内已识别到输液单,**自动关联,不必问**
+
+#### ⚠️ 药物剂量是另一套单位体系
+
+同一张单上并存**体积**(mL)、**质量**(mg / g 混用)、**浓度**(%)。`0.15 克 = 150 毫克`;浓度 × 体积可算实际溶质量(10% 氯化钠 10 mL = 1 g NaCl)。
+
+`packages/medical/src/units/` 只处理检验单位 → **需要独立的 `units/dose` 模块**,两套体系不可混用。
+
+#### 提取要求
+
+- **`name_raw` 存原文,`generic_name` 剥离采购信息。** 真实药名形如 `5%葡萄糖注射液(科伦250ml,23年集采)`、`15%氯化钾注射液(25年国采)` —— 括号里的厂家与集采批次对长期用药记录无价值,且会污染药名匹配
+- **`frequency_raw` 不做归一化解析。** 中英混排(`静滴 ONCE 1天`)的解析风险高、收益低,原文保留 + 可选打标签
+- **费用信息记录但不建模。** 输液单上有收费明细,存入 `extraction.structured` 即可,不建费用表 —— 除非明确需要报销/支出统计功能
 
 ### `metric_group` / `metric_group_item`
 
@@ -385,8 +536,19 @@ PK `(account_id, person_id)`
 
 ```
 metric_group      (id, person_id, name, description, is_template, created_at)
-metric_group_item (group_id, concept_code, display_order, note)
+metric_group_item (group_id, item_type, concept_code, body_site, conclusion_tag,
+                   display_order, note)
 ```
+
+`item_type` 支持三类条目 —— **监控组不能只绑化验指标**:
+
+| `item_type` | 绑定 | 例 |
+|---|---|---|
+| `lab` | `concept_code` | LDL_C、HbA1c |
+| `imaging_measure` | `concept_code` + `body_site` | 睾丸体积(左)、甲状腺结节最大径 |
+| `conclusion` | `conclusion_tag` | 「鞘膜积液」出现/未出现于历次影像结论 |
+
+> 真实案例:一次为查腹泻开的腹部超声,**顺带扫了阴囊**,产生了鞘膜积液的随访数据。这正是本项目的核心场景 ——「每次检查不一定针对该问题,但顺带查到的值应能纳入长期记录」。若监控组只能绑化验指标,这条路径就断了。
 
 ---
 
