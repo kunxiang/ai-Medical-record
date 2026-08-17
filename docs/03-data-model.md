@@ -323,7 +323,10 @@ COVID 单没有「单位」与「检测仪器」列。**按固定列序解析必
 |---|---|---|
 | `id` | uuid PK | |
 | `document_id` | uuid FK | |
-| `version` | int | 该 document 下自增 |
+| `version` | int | 该 document 下自增(重跑时 +1) |
+| `round` | int | **闭环轮次**(1 起)—— 见下方 ★ |
+| `triggered_by` | jsonb nullable | 触发本轮的失败规则;第 1 轮为 null |
+| `parent_extraction_id` | uuid FK nullable | 上一轮 |
 | `model_id` | text | 如 `claude-opus-5` |
 | `prompt_version` | text | 如 `extract-lab-report.v3` |
 | `pipeline_version` | text | 代码版本 |
@@ -339,6 +342,24 @@ COVID 单没有「单位」与「检测仪器」列。**按固定列序解析必
 | `started_at` / `finished_at` | timestamptz | |
 
 **重跑规则:** 生成新 `extraction` 并置 `is_active`,旧版标 `superseded`。旧记录**不删除** —— 它是"当时机器怎么读的"的凭证。
+
+#### ★ `round` —— 校验驱动的多轮闭环
+
+提取不是一轮。**校验失败不是终点,是"回原图重看"的信号。**
+
+先验:**报告是自洽的,不自洽的是我的读法。** MCV / MCHC / PCT / HCO₃⁻ / 估算体积都是仪器自己算出来的,不可能与源数据不自洽(实证:4 个用例、26 次规则执行、零失败)。
+
+```
+version 1 ─ round 1 ──校验失败──> round 2(裁剪区域重读)──> round 3
+                                                              │
+                        同一 version 共享,is_active 指向最后一轮 ┘
+```
+
+- 同一 document 的多轮 extraction **共享一个 `version`**;`version` 只在整体重跑(换模型/换 prompt)时递增
+- **每一轮读数全部留档** —— 轮次间的分歧本身是信息,与双次提取取差集同源
+- 最多 3 轮;每轮失败数必须严格下降,否则中止转人工
+
+详见 [06 · AI 管线](./06-ai-pipeline.md#防线-3校验驱动的多轮闭环重读)。
 
 ### `observation` — 结构化检验值
 
