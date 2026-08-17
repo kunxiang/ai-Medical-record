@@ -369,6 +369,16 @@ GET  /api/v1/exports/:id/download
 }
 ```
 
+### 单人档案 bundle 导出(ADR-045)
+
+"孩子成年带走自己的完整档案"的接口形态。bundle 的组成规则(前缀拷贝 + manifests 按人过滤回放 + decisions 共享/私有分类 + `_meta/` 全量)定义在 [04 §5](./04-storage-layout.md#5-打包与迁移adr-045),schema 在 `packages/contracts`:
+
+```
+POST /api/v1/exports/person-bundle        { "person_id": "…" }
+GET  /api/v1/exports/:id                  轮询状态
+GET  /api/v1/exports/:id/download         zip(L1 子集,不含任何 derived)
+```
+
 **导出内容的硬性约束:**
 
 - ✅ 趋势表、事件时间轴、原件附录、数据来源标注

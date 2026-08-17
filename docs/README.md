@@ -8,13 +8,14 @@
 | 01 | [系统架构](./01-architecture.md) | 分层、技术栈、多用户与多平台的演进策略 |
 | 02 | [仓库结构](./02-repo-structure.md) | Monorepo 布局与依赖规则 |
 | 03 | [数据模型](./03-data-model.md) | 实体、字段、关系、索引 |
-| 04 | [存储布局](./04-storage-layout.md) | S3 key 规范、sidecar、备份 |
+| 04 | [存储布局](./04-storage-layout.md) | 三层权威矩阵、key 规范、sidecar、journal、打包迁移、备份 |
 | 05 | [采集与情境问答](./05-capture-and-context.md) | 拍照流程、归人确认、问答模板 |
 | 06 | [AI 管线](./06-ai-pipeline.md) | 提取、转写、校验的编排与模型选型 |
 | 07 | [API 契约](./07-api-contract.md) | 后端接口 |
 | 08 | [医学参考层](./08-medical-reference.md) | 单位换算、参考区间、RCV、监控组 |
 | 09 | [路线图](./09-roadmap.md) | 分阶段实施 |
 | — | [架构决策记录](./adr.md) | 关键决策及其理由(持续追加) |
+| — | [设计债登记](./design-debt.md) | 已知缺陷、里程碑绑定、验收标准 |
 
 ## 想快速理解这个项目?
 

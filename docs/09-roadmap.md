@@ -18,7 +18,8 @@
 - [ ] Monorepo 骨架(`apps/api`、`apps/web`、`packages/contracts`、`packages/storage`)
 - [ ] `packages/contracts` 首版:person / document / encounter 类型与 Zod schema
 - [ ] PostgreSQL schema + Drizzle 迁移(见 [03 · 数据模型](./03-data-model.md))
-- [ ] S3 桶创建:**versioning + object lock 必须在建桶时开启**(事后无法补)
+- [ ] S3 桶创建:**versioning + object lock 必须在建桶时开启**(事后无法补);**不设桶级默认保留期**,按 04 §1 矩阵逐对象上锁(ADR-045)
+- [ ] `_meta/` 自述层落桶:README(布局/回放规则/journal 事件注册表)+ schema 快照 + 注册表快照(ADR-045)
 - [ ] `packages/storage`:key 生成/解析 + sidecar 序列化 + 往返测试
 - [ ] 账号认证 + `person_access` 授权中间件(**从第一天起所有查询都过这一层**)
 - [ ] 建档 API
@@ -36,7 +37,8 @@
 - [ ] PWA:拍照(含连拍模式)、PDF/截图/相册导入
 - [ ] **IndexedDB 离线队列 + Service Worker 后台重试**
 - [ ] 上传队列状态 UI(「3 张待上传」)
-- [ ] sidecar JSON 写入 S3
+- [ ] capture.json(拍摄事实)随上传即写 S3 —— 不等 AI(ADR-045)
+- [ ] **人工层 journal 双写机制**(`people/{slug}/journal/`)—— 与首个人工输入同批上线,此后每个产生人工输入的功能都必须接入(ADR-045,原设计债 D1)
 - [ ] 缩略图 / 预览图生成
 - [ ] 文档浏览:按人 → 时间轴 → 文档
 
@@ -69,7 +71,8 @@
 - [ ] 问答模板引擎 + 版本化模板文件
 - [ ] 化验单 / 影像 / 处方 / 体检 / 通用 五套模板
 - [ ] 按住说话录音(iOS Safari 权限流程)
-- [ ] 分段音频上传 + S3 归档
+- [ ] 分段音频上传 + S3 归档(无文档会话落 `people/{slug}/context/`,ADR-045)
+- [ ] 问答**全部答案类型**(点选/数字/文字/日期/照片)journal 双写(ADR-045)
 - [ ] ASR 接入(**选型前用真实录音实测中文医学术语**)
 - [ ] 转写后的 Claude 结构化抽取
 - [ ] 当天补录推送提醒
@@ -122,7 +125,7 @@
 - [ ] RCV 计算 + 趋势图上的波动带
 - [ ] 派生指标:eGFR(CKD-EPI 2021)、non-HDL-C、BMI
 - [ ] 监控组管理 + 「三高+」预置模板
-- [ ] **血压独立数据流**(手动录入 + measurement_setting 区分)
+- [ ] **血压独立数据流**(手动录入 + measurement_setting 区分;`manual_observation` 事件 journal 双写,ADR-045)
 - [ ] 趋势图(跨医院单位归一,标注数据来源)
 - [ ] 情境标注叠加(非空腹 / 近期发热 / 用药变更)
 
@@ -155,7 +158,7 @@
 - [ ] 批量导入工具(存量单据)
 - [ ] 数据导出(全量 zip + JSON)
 
-**验收:** 删掉整个数据库,能从 S3 完全重建,**含人工层(修正/问答/归组/决策)零丢失**(design-debt D1)。
+**验收:** 删掉整个数据库,能从 S3 完全重建,**含人工层(修正/问答/归组/决策/手动录入/person 编辑)零丢失**(ADR-045 journal,自 M1 起持续双写 —— M8 只验收,不补课)。另:单人导出演练 —— 导出一个孩子的 bundle,档案完整且不含他人隐私(design-debt D9)。
 
 ---
 

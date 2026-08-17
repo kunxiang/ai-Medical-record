@@ -24,7 +24,7 @@ normalization_decision(独立 —— 按输入指纹缓存 AI 归一化判断,�
 - **不可变层**:`document`、`document_page` —— 原件,写入后永不修改
 - **派生层**:`extraction`、`observation` —— 可重跑、可版本化
 - **决策层**:`normalization_decision` —— AI 归一化判断的持久缓存,同指纹确定性重放
-- **人工层**:`context_answer`、`observation.review_status`、**已确认的归一化决策** —— 人的输入与确认,优先级高于机器,**不可从原件重建**(须随导出与备份)
+- **人工层**:`context_answer`、`observation.review_status`、**已确认的归一化决策**、手动 observation、`metric_group`、person 编辑、归人裁决 —— 人的输入与确认,优先级高于机器,**不可从原件重建** → 写库事务内**双写追加 `people/{slug}/journal/`**(ADR-045,不是异步导出)
 
 ---
 
@@ -61,6 +61,8 @@ normalization_decision(独立 —— 按输入指纹缓存 AI 归一化判断,�
 | `note` | text | |
 | `created_at` / `updated_at` / `archived_at` | timestamptz | 软删除 |
 
+> 每次编辑重写 S3 `_person.json` **全量**快照(含 allergies / chronic_conditions / identifiers,ADR-045)并追加 journal `person_update` 事件 —— 过敏史是"只有人知道、原件里没有"的典型,数据库不能是它唯一的家。
+>
 > 身高、体重、腰围**不放在这里** —— 它们随时间变化,是 `observation`(LOINC 8302-2 身高、29463-7 体重、56086-2 腰围)。
 
 ### `person_identifier` — 各医院的院内标识
@@ -569,7 +571,7 @@ version 1 ─ round 1 ──校验失败──> round 2(裁剪区域重读)─�
 
 1. **合并类必须人工确认。** 拆分可逆,合并有损 —— 把「红细胞比容计算值」(iSTAT)并进「红细胞比积」(血球仪)会抹掉 2.9% 的真实方法学差异。反例断言见 [用例 001](../fixtures/001-pediatric-emergency/);与之相对,[用例 004](../fixtures/004-influenza-visit/) 的双语行**必须**合并 —— 一对方向相反的断言钉住判断边界。
 2. **低置信不映射。** `concept_code` 置 null,原值照常入库,确认后重放补全。
-3. **已确认决策是人工层。** 不可从原件重建 → 追加导出到 S3 `_index/decisions/`,维持"数据库可从 S3 重建"不变式。
+3. **已确认决策是人工层。** 不可从原件重建 → 追加导出到 S3 `_index/decisions/`,维持"数据库可从 S3 重建"不变式;其词表注册表快照随 `_meta/registries/` 落桶(ADR-045)—— decisions 离开代码仓库必须仍可解读。
 
 ---
 
@@ -607,7 +609,9 @@ version 1 ─ round 1 ──校验失败──> round 2(裁剪区域重读)─�
 | `skipped` | bool | 跳过必须零成本 |
 | `answered_at` | timestamptz | |
 
-> 音频与影像遵循同一原则:**原始录音是真相,转写是可再生的派生层。** 今天的模型认不出的方言或专业词,以后能认出来。
+> 音频与影像遵循同一原则:**原始录音是真相,转写是可再生的派生层**(落 `derived/.../transcripts/`,ADR-045)。今天的模型认不出的方言或专业词,以后能认出来。
+>
+> 非语音答案(点选/数字/文字/日期/照片)没有"原件"可依托 —— **journal 追加行就是它们的 L1 落点**(ADR-045),与写库同事务双写。
 
 ---
 
@@ -684,7 +688,7 @@ version 1 ─ round 1 ──校验失败──> round 2(裁剪区域重读)─�
 
 ### `metric_group` / `metric_group_item`
 
-用户自定义的长期监控组(如"三高")。预置模板见 [08 · 医学参考层](./08-medical-reference.md#5-推荐监控组)。
+用户自定义的长期监控组(如"三高")。预置模板见 [08 · 医学参考层](./08-medical-reference.md#5-推荐监控组)。定义与每次修改以 `metric_group_upsert` 事件双写 journal(ADR-045)—— 用户自建监控组不可再生。
 
 ```
 metric_group      (id, person_id, name, description, is_template, created_at)
@@ -719,6 +723,8 @@ metric_group_item (group_id, item_type, concept_code, body_site, conclusion_tag,
 | `at` | timestamptz | |
 
 **必须记入审计的操作:** 归人变更、observation 人工修正、文档删除、权限授予/撤销。
+
+> 落点(ADR-045):人工动作类审计已随 journal 双写,不重复记;系统级事件(权限授予/撤销、文档删除)追加导出 `_index/audit/{YYYY-MM}.jsonl`。
 
 ---
 

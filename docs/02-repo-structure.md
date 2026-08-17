@@ -36,7 +36,7 @@ ai-Medical-record/
 │   └── miniprogram/            # (未来)微信小程序
 │
 ├── packages/
-│   ├── contracts/              # ★ API 契约:类型 + Zod schema + 错误码
+│   ├── contracts/              # ★ API 契约:类型 + Zod schema + 错误码 + journal 事件 schema + 导出 bundle schema(ADR-045)
 │   ├── medical/                # ★ 医学执行层:纯函数,零依赖(判断在 AI 决策层,ADR-040)
 │   │   ├── src/
 │   │   │   ├── concepts/       # 概念查询 API(消费已确认决策的快照;无人工别名表)
