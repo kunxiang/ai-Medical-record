@@ -87,8 +87,9 @@ apps/web      ──不依赖──> apps/api        ❌ 只通过 contracts 通
 export const DocType = z.enum([
   'lab_report', 'imaging_report', 'prescription', 'discharge_summary',
   'pathology', 'outpatient_note', 'checkup_report', 'ecg',
-  'vaccination', 'other', 'unknown',
+  'vaccination', 'infusion_order', 'other', 'unknown',
 ]);
+// ★ 单一来源:DB / 分类器 / 问答模板的 doc_type 全部由此导出(ADR-043 注册表)
 export type DocType = z.infer<typeof DocType>;
 ```
 

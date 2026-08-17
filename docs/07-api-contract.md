@@ -117,9 +117,9 @@ DELETE /api/v1/people/:id/identifiers/:iid
 }
 ```
 
-### 归人建议(可选前置调用)
+### 归人建议(仅用于对账与批量导入,[ADR-041](./adr.md#adr-041))
 
-拍照后、确认前,客户端可先拿 AI 的归人建议:
+正常拍照流程**不调用**此接口 —— 归人是拍照时本地手选的(05 §2)。此接口只在两处使用:①服务端归人对账(比对 AI 读名与所选人);②批量导入时给 `needs_person_confirm` 文档预排序候选。
 
 ```
 POST /api/v1/documents/suggest-person
@@ -139,7 +139,7 @@ POST /api/v1/documents/suggest-person
 }
 ```
 
-> ⚠️ **服务端永远不接受"自动归人"。** `POST /documents` 必须带 `person_confirmed: true`,由人点过一次。
+> ⚠️ **服务端永远不接受"自动归人"。** `POST /documents` 必须带 `person_confirmed: true`,由人点过一次。**唯一例外:批量导入**可以 `person_confirmed: false` 入库,此时 `status = needs_person_confirm`,文档在确认前不参与趋势/汇总,只出现在确认队列里。
 
 ### 归人纠正
 
@@ -152,6 +152,34 @@ POST /api/v1/documents/:id/reassign-person
 ```
 
 写入 `audit_log`,并触发受影响 observation 的 `person_id` 级联更新。
+
+### 归人对账与批量确认([ADR-041](./adr.md#adr-041))
+
+服务端提取完成后,自动比对 AI 读到的姓名/证件号与上传时所选的 person。不一致时置 `document.person_mismatch = true` 并进入对账队列:
+
+```
+GET  /api/v1/person-mismatches                  待对账列表
+POST /api/v1/documents/:id/resolve-mismatch     裁决单条
+```
+
+```json
+// resolve-mismatch 请求
+{ "resolution": "reassign", "person_id": "…" }      // AI 对了,改归属
+// 或
+{ "resolution": "keep", "note": "报告打的是曾用名" }  // 手选对了,AI 读错/读的是别名
+```
+
+批量导入的存量文档批量确认归属:
+
+```
+POST /api/v1/documents/batch-confirm-person
+```
+
+```json
+{ "document_ids": ["…", "…"], "person_id": "…" }
+```
+
+逐条写 `audit_log`,确认后 `status` 离开 `needs_person_confirm`,文档进入正常管线。
 
 ---
 

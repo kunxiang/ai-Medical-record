@@ -10,7 +10,7 @@
     "department": "内科急诊",
     "ordering_doctor": "医师甲",
     "clinical_diagnosis": "呕吐查因",
-    "specimen": "whole_blood",
+    "specimen": "venous_blood",
     "specimen_label": "静脉血",
     "page_count": 1,
     "collected_at": "2026-08-17T17:07:00+08:00",

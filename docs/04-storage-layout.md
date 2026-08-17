@@ -26,7 +26,7 @@ s3://<bucket>/
 │       ├── _person.json                     # 姓名/生日/性别 的离线可读副本
 │       │
 │       └── {YYYY}/
-│           └── {YYYY-MM-DD}__{facility}__{doctype}__{doc_short_id}/
+│           └── {capture_date}__{doc_short_id}/   # ★ key 只含拍摄日 + 短 ID(ADR-041)
 │               ├── document.json            # ★ 文档级 sidecar
 │               ├── page-01.jpg              # ★ 原件,写入后永不修改
 │               ├── page-01.json             # 页级 sidecar(sha256/尺寸/EXIF)
@@ -47,7 +47,10 @@ s3://<bucket>/
 └── _index/
     ├── people.json                          # slug → 姓名 映射表
     ├── manifests/
-    │   └── {YYYY-MM}.jsonl                  # 每月增量清单,灾难恢复用
+    │   └── {YYYY-MM}.jsonl                  # 增量清单,追加写(含更正行),灾难恢复用
+    ├── views/                               # ★ 人类可读视图,随时可全量重建(ADR-041)
+    │   ├── by-facility.json                 # 机构 → 文档目录列表
+    │   └── by-doctype.json                  # 类型 → 文档目录列表
     └── decisions/
         └── {YYYY-MM}.jsonl                  # 已确认的归一化决策 + 人工修正(人工层,不可从原件重建,ADR-040)
 ```
@@ -55,12 +58,22 @@ s3://<bucket>/
 ### 目录名示例
 
 ```
-people/p3f7a2/2024/2024-03-15__xiehe__lab_report__d7k2m9/
-people/p3f7a2/2024/2024-03-15__xiehe__prescription__d8n4p1/
-people/p9c1e5/2023/2023-11-02__renmin__imaging_report__d2h6r3/
+people/p3f7a2/2024/2024-03-15__d7k2m9/
+people/p3f7a2/2024/2024-03-15__d8n4p1/
+people/p9c1e5/2023/2023-11-02__d2h6r3/
 ```
 
-**一眼能看出:谁、什么时候、哪家医院、什么类型。** 这正是五年后翻档案时需要的。
+### ★ 为什么 key 里没有机构和类型(ADR-041)
+
+早期设计把 `{facility}__{doctype}` 编进 key。审核发现这是**上传链路的死结**:facility 和 doctype 都是 **AI 提取后才知道的**,而上传必须在提取前完成 —— 要么先传后改名(与 WORM 对象锁冲突,原件永不移动),要么阻塞上传等提取(违背"拍完即存档成功")。而且 AI 分类还可能被人工修正,key 却永不能改。
+
+所以 key 只保留**上传时刻就确定且永不变**的两个信息:拍摄日期 + 短 ID。"谁、什么时候"仍在 key 里;"哪家医院、什么类型"的可读性由三层补偿:
+
+1. 每个文档目录下的 `document.json`(中文机构名、类型、摘要)
+2. `_index/views/by-facility.json` / `by-doctype.json` —— 按机构/类型浏览的可重建视图
+3. 数据库与检索索引
+
+五年后用 `rclone cat` 读 `document.json`,或直接翻 views,照样知道每个目录是什么。
 
 ### 为什么 key 用 ASCII 而不是中文
 
@@ -198,11 +211,14 @@ S3 key 支持 UTF-8,中文名对浏览更直观。但:
 
 ### `_index/manifests/{YYYY-MM}.jsonl`
 
-每行一个新增文档,追加写入。用途:**在数据库全丢的情况下重建索引**,无需遍历整个桶。
+每行一条事件,**只追加、永不改写已有行**(与 WORM 兼容,ADR-041)。用途:**在数据库全丢的情况下重建索引**,无需遍历整个桶。
 
 ```jsonl
-{"doc_short_id":"d7k2m9","person_slug":"p3f7a2","prefix":"people/p3f7a2/2024/2024-03-15__xiehe__lab_report__d7k2m9/","created_at":"2024-03-15T10:32:45+08:00"}
+{"op":"add","doc_short_id":"d7k2m9","person_slug":"p3f7a2","prefix":"people/p3f7a2/2024/2024-03-15__d7k2m9/","created_at":"2024-03-15T10:32:45+08:00"}
+{"op":"correct","doc_short_id":"d7k2m9","fields":{"person_slug":"p9c1e5"},"reason":"归人纠正","created_at":"2024-03-16T09:01:00+08:00"}
 ```
+
+更正(归人纠正、类型改判等)写 `op: "correct"` 行,重建时**按时间序回放,后写覆盖先写**(last-writer-wins)。原 `add` 行留着 —— 它是"当时怎么记的"的凭证。
 
 ---
 
@@ -213,7 +229,7 @@ S3 key 支持 UTF-8,中文名对浏览更直观。但:
 | 配置 | 设置 | 理由 |
 |---|---|---|
 | **版本控制 Versioning** | 开启 | 防误删、防误覆盖。便宜且保命 |
-| **对象锁 Object Lock (WORM)** | 开启,合规模式,保留期 ≥ 10 年 | 防住代码 bug 或误操作批量删档。对"存一辈子"的原件有意义 |
+| **对象锁 Object Lock (WORM)** | 开启,**治理模式(Governance)**,保留期 ≥ 10 年 | 防住代码 bug 或误操作批量删档。选治理而非合规模式(ADR-041):合规模式下**任何人包括桶主都无法纠错**(拍错的废片、误传的隐私照片将强制保留十年);治理模式日常同样拦删,但持特权凭证可显式绕过 —— 该凭证不进应用,只离线保管 |
 
 > 对象锁要在**创建桶时**启用,事后无法开启。如果不确定,宁可先开。
 
@@ -231,7 +247,7 @@ S3 key 支持 UTF-8,中文名对浏览更直观。但:
 ### 生命周期
 
 - **不设自动删除规则。** 这是永久档案。
-- 可设:非当前版本(versioning 产生的旧版)保留 90 天后清理。
+- 可设:非当前版本(versioning 产生的旧版)保留 90 天后清理。注意:被对象锁保留期覆盖的版本,生命周期规则删不掉 —— 这正是期望行为;原件旧版本实际上会保留到锁到期。
 - `derivatives/` 可设 180 天未访问转低频 —— 反正能重建。
 
 ---

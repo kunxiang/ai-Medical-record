@@ -80,7 +80,7 @@ const ClassifySchema = z.object({
   doc_type: z.enum([
     'lab_report', 'imaging_report', 'prescription', 'discharge_summary',
     'pathology', 'outpatient_note', 'checkup_report', 'ecg',
-    'vaccination', 'other', 'unknown',
+    'vaccination', 'infusion_order', 'other', 'unknown',   // ★ 从 contracts 导出,勿在此维护
   ]),
   doc_type_confidence: z.number().min(0).max(1),
   patient_name: z.string().nullable(),
@@ -96,6 +96,9 @@ const ClassifySchema = z.object({
   reported_on: z.string().nullable(),
   summary: z.string(),                  // 一句话:这是什么单子
   full_text: z.string(),                // ★ 完整文本,保留原始换行与表格结构
+  pii_spans: z.array(z.object({         // PII 位置标注(ADR-044:完整文本只进 sidecar,
+    kind: z.string(), start: z.number(), end: z.number(),  // 入索引/embedding 前由确定性代码按 span 遮蔽)
+  })),
 });
 
 const response = await client.messages.parse({
@@ -145,7 +148,7 @@ const LabObservation = z.object({
   ref_low: z.number().nullable(),      // ★ 该报告自带的参考区间
   ref_high: z.number().nullable(),
   ref_text: z.string().nullable(),     // 非数值区间,如 "阴性"
-  abnormal_flag: z.enum(['H','L','HH','LL','N','A']).nullable(),  // 报告上的 ↑↓
+  abnormal_flag_raw: z.string().nullable(),  // 原始符号照抄(↑/↑↑↑/※/H…)—— 标准化由归一层按上下文判断(ADR-035)
   method: z.string().nullable(),       // 方法学
   specimen: z.string().nullable(),
   confidence: z.number().min(0).max(1),
@@ -174,6 +177,7 @@ const LabReportSchema = z.object({
 6. **保留限定词。** 「氧分压」与「氧分压(校正)」是两行不同的记录,`qualifier` 分别为 null 和 `corrected`,不可合并。
 7. **提取每行的检测仪器与检测方法**,写入 `device` / `method`。
 8. **识别非结果行。** 血气报告中的体温、吸氧浓度是仪器输入参数,标 `result_kind = input_parameter`。
+9. **残差通道(ADR-043)。** 每个 schema 带 `unmodeled: [{label, value, region}]` —— 装不进 schema 的结构必须进残差,**禁止丢弃**。残差是「schema 该长了」的原始信号,由策展员聚类后生成晋升提案。
 
 ### 已知 OCR 陷阱(写进 prompt 的检查清单)
 
@@ -203,7 +207,7 @@ const LabReportSchema = z.object({
 
 原图里当然仍有这些信息 —— 但那是不可变原件,不进入结构化层、不进入全文索引、不进入 embedding。
 
-prompt 中显式列出 `pii_drop_list`,并在回归集中加入验证用例:**输出里出现手机号即判定失败**。
+**full_text 分两层**(消解与 ADR-015「完整性」的矛盾,审核 C-F8):S3 sidecar 存**带 PII span 标注的完整文本**(与原件同级,不出库);入全文索引与 embedding 前,由**确定性代码**按 span 遮蔽。回归断言相应改为:**索引层出现手机号即判定失败**(而非提取输出层 —— 提取层必须完整)。
 
 ### 影像 / 叙述型报告的提取
 
@@ -222,9 +226,11 @@ const ImagingReportSchema = z.object({
   measurements: z.array(z.object({        // 可纵向追踪的测量值
     local_name: z.string(),
     body_site: z.string().nullable(),
-    dimensions: z.object({
-      l: z.number(), w: z.number(), h: z.number(), unit: z.string(),
-    }).nullable(),
+    // 开放维度数组:2D/3D/角度均可容纳(ADR-042)。ellipsoid_volume 校验
+    // 声明「恰好 3 个长度维度」为适用条件,不满足则静默跳过
+    dimensions: z.array(z.object({
+      label: z.string(), value: z.number(), unit: z.string(),
+    })).nullable(),
     value_num: z.number().nullable(),
     unit_raw: z.string().nullable(),
   })),
@@ -418,13 +424,17 @@ P(OCR 读错) >> P(报告本身错)
   ↓
 裁剪原图相应区域(+ 表头行作上下文)
   ↓
-带着失败信息重读:
-  「MCHC 自洽校验失败:由 Hb=130、HCT=38.1 算得 341.2,
-    但读到的 MCHC 是 34.1。请重新读取这三个格子。
-    注意小数点与位数。」
+★ 盲审重读 —— 只给嫌疑位置,不给期望值:
+  「请重新读取裁剪图中这三个格子的数值与单位。
+    注意小数点、位数与正负号。
+    独立读取,不要参考任何先前结果。」
   ↓
-重新校验
+重新校验(确定性代码,不是 AI)
 ```
+
+**⚠️ 重读 prompt 里严禁出现期望值。** 若 prompt 写成「算得 341.2,但读到 34.1,请重读」,模型会倾向直接抄 341.2 —— 闭环退化为确认偏误机器:校验永远通过,但通过的是"模型顺从",不是"读对了"。盲审下重读值与期望值独立地收敛,才构成证据([ADR-044](./adr.md#adr-044))。
+
+补充防线:对 `converged_to_expected`(重读后恰好等于期望值)的案例按比例抽样进人工复核 —— 如果盲读也总能"恰好"读出期望值,要么真读对了,要么裁剪图泄露了信息,抽样能区分这两者。
 
 | 失败层级 | 裁剪范围 |
 |---|---|

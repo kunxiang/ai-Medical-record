@@ -74,6 +74,7 @@ normalization_decision(独立 —— 按输入指纹缓存 AI 归一化判断,�
 | `facility_id` | uuid FK nullable |
 | `identifier_type` | enum(`patient_id`,`card_no`,`medical_record_no`,`other`) |
 | `identifier_value` | text |
+| `scope` | enum(`long_term`,`single_visit`) | 登记号=长期,门诊号=单次 —— **归人只信长期标识** |
 
 唯一约束:`(facility_id, identifier_type, identifier_value)`
 
@@ -172,6 +173,8 @@ encounter(就诊)
 | `facility_id` | uuid FK nullable | 冗余自 encounter,便于直接筛选 |
 | `report_no` | text nullable | **报告编号** —— 见下方说明 |
 | `accession_no` | text nullable | 流水号 |
+| `visit_no` | text nullable | 门诊号(单次标识,fixture 003 回填) |
+| `specimen` / `specimen_label` | text nullable | 文档级标本类型(观测级可覆盖) |
 | `panel_name` | text nullable | 报告标题,如 `血气分析7`、`血常规(五分类)+超敏CRP` |
 | `ordering_doctor` | text nullable | 申请医师 |
 | `clinical_diagnosis` | text nullable | **报告上直接印的临床诊断** —— 见下方说明 |
@@ -180,7 +183,7 @@ encounter(就诊)
 | `report_notes_source` | text | 固定 `report_original`,与系统生成内容区分 |
 | `column_set` | jsonb nullable | 该报告的表头列集合 —— 见下方 ⚠️ |
 | `uploaded_by` | uuid FK account | |
-| `status` | enum(`uploading`,`uploaded`,`needs_person_confirm`,`ready`,`failed`) | |
+| `status` | enum(`uploading`,`uploaded`,`needs_person_confirm`,`ready`,`failed`) | `needs_person_confirm` 仅**批量导入**路径可达(ADR-041) |
 | `created_at` | timestamptz | |
 
 > **三个日期必须分开存。** 采样日期 / 报告日期 / 就诊日期经常差好几天。做趋势用采样日期,找档案时人记得的往往是就诊日期。事后无法补救。
@@ -372,8 +375,9 @@ version 1 ─ round 1 ──校验失败──> round 2(裁剪区域重读)─�
 |---|---|---|
 | `id` | uuid PK | |
 | `person_id` | uuid FK | 冗余,查询性能 |
-| `document_id` | uuid FK | |
-| `extraction_id` | uuid FK | 溯源到哪次提取 |
+| `document_id` | uuid FK **nullable** | 手动录入(家庭血压/体重)时为空 |
+| `extraction_id` | uuid FK **nullable** | 溯源到哪次提取;手动录入为空 |
+| `source` | enum(`extracted`,`manual`,`derived`) | 数据来源 |
 | `encounter_id` | uuid FK nullable | |
 | **概念标识** | | |
 | `concept_code` | text | 内部指标字典 code,如 `LDL_C` |
@@ -385,8 +389,9 @@ version 1 ─ round 1 ──校验失败──> round 2(裁剪区域重读)─�
 | `value_num` | numeric nullable | 可解析的数值 |
 | `comparator` | enum(`=`,`<`,`>`,`<=`,`>=`) nullable | 处理 `<0.01` 这类结果 |
 | `value_text` | text nullable | 定性结果:阴性/阳性/+/++ |
-| `value_dimensions` | jsonb nullable | **多维测量**,如 `{"l":1.4,"w":0.6,"h":0.9,"unit":"cm"}`。见下方 ⚠️ |
-| `body_site` | text nullable | **解剖部位**,如 `testis.left`。见下方 ⚠️ |
+| `value_dimensions` | jsonb nullable | **多维测量**,开放数组 `[{"label":"l","value":1.4,"unit":"cm"},…]` —— 2D/3D/角度均可(ADR-042)。见下方 ⚠️ |
+| `body_site` | text nullable | **解剖部位**,如 `testis.left`(归一走 `body_site_map` 决策)。见下方 ⚠️ |
+| `extra_dims` | jsonb nullable | 未晋升的序列维度(开放);与 qualifier / body_site / specimen / device / method / measurement_setting 共同构成 `series_key`(ADR-042) |
 | `unit_raw` | text | 报告上的原始单位 |
 | **标准化(派生)** | | |
 | `value_si` | numeric nullable | 换算到规范单位后的值 |
@@ -402,7 +407,9 @@ version 1 ─ round 1 ──校验失败──> round 2(裁剪区域重读)─�
 | `method` | text nullable | 方法学(流式细胞计数法 / 电阻抗法 / 散射比浊法…) |
 | `device` | text nullable | **检测仪器**,如 `血气iSTAT1-300G`、`BC-7500-2`。见下方 ⚠️ |
 | `result_kind` | enum(`measured`,`calculated`,`input_parameter`) | 实测 / 仪器计算 / 输入参数。见下方 ⚠️ |
-| `specimen` | enum(`serum`,`plasma`,`whole_blood`,`urine`,`other`) nullable | |
+| `specimen` | text nullable | **开放受控词表**(ADR-042):serum / plasma / venous_blood / capillary_blood / nasal_swab / urine…;归一走 `specimen_map` 决策 |
+| `specimen_label` | text nullable | 报告原文,如 `末梢血` |
+| `measurement_setting` | text nullable | 测量情境:office / home / ambulatory_24h…(ADR-019 的承载,此前缺失) |
 | `collected_at` | timestamptz nullable | 采样时刻(含时间,昼夜节律相关指标需要) |
 | `reported_at` | timestamptz nullable | |
 | `lab_facility_id` | uuid FK nullable | 检验机构 |
@@ -462,7 +469,7 @@ version 1 ─ round 1 ──校验失败──> round 2(裁剪区域重读)─�
 血气报告同时给出「氧分压 65」与「氧分压(校正) 67」,**参考区间还不一样**(83–108 / 80–100);pH、二氧化碳分压同理。若都映射到同一个 `concept_code`,趋势图上会出现同一时刻两个点。
 
 ```
-唯一性由 (document_id, concept_code, qualifier) 决定,而非 concept_code 单独决定
+唯一性由 (document_id, concept_code, series_key) 决定 —— qualifier 是 series_key 的一个维度(ADR-042)
 ```
 
 **2. `device` —— 同一管血、同一指标,不同仪器给出不同值**
@@ -504,7 +511,8 @@ version 1 ─ round 1 ──校验失败──> round 2(裁剪区域重读)─�
 2. **解剖部位是新维度** —— 左睾丸与右睾丸是**两条独立的时间序列**。化验单没有这个概念,影像报告普遍有(左/右、上/下、各叶各段)
 
 ```
-唯一性:(document_id, concept_code, qualifier, body_site)
+序列身份 = concept_code + series_key(全部序列维度映射的确定性哈希,ADR-042)
+行唯一性 = (document_id, concept_code, series_key) —— 新维度不再迁移唯一键
 ```
 
 **派生让历史可比:** 2024 那份没给体积,但椭球公式 `V = 0.5236 × L × W × H` 在 2026 那份上验证成立(左 0.3958 vs 报告 0.39 ✓),因此可以给 2024 补算,使两个时间点落到同一根轴上:
@@ -533,7 +541,7 @@ version 1 ─ round 1 ──校验失败──> round 2(裁剪区域重读)─�
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `id` | uuid PK | |
-| `decision_type` | enum(`concept_map`,`unit_identify`,`row_merge`,`row_split`,`flag_semantics`,`facility_map`,`encounter_group`,`drug_name_strip`,`pii_identify`,`comparability`) | |
+| `decision_type` | text | **注册表模式**(ADR-043):清单注册于 `packages/contracts`,每型含指纹字段清单 + 确定性规范化规则 + 可逆性标记。首批:concept_map / unit_identify / **specimen_map** / **body_site_map** / row_merge / row_split / flag_semantics / facility_map / encounter_group / drug_name_strip / pii_identify / comparability / **concept_mint** |
 | `fingerprint` | text | 规范化输入的指纹 —— **同指纹必得同决策** |
 | `input` | jsonb | 原始输入(局部名 / 单位原文 / 上下文摘要) |
 | `output` | jsonb | 判断结果(concept_code / UCUM 码 / 合并指令…) |
@@ -588,7 +596,7 @@ version 1 ─ round 1 ──校验失败──> round 2(裁剪区域重读)─�
 | `session_id` | uuid FK | |
 | `question_key` | text | 如 `fasting_status` |
 | `question_text_snapshot` | text | **当时问题的原文** —— 模板会变,快照不变 |
-| `answer_type` | enum(`choice`,`multi_choice`,`number`,`datetime`,`text`,`audio`) | |
+| `answer_type` | enum(`choice`,`multi_choice`,`number`,`datetime`,`text`,`audio`,`photo`) | photo:拍药盒等(模板第 7 题此前无枚举可用) |
 | `value_choice` / `value_number` / `value_text` / `value_datetime` | | |
 | `audio_key` | text nullable | **S3 中的原始音频 —— 与影像同级,永不删除** |
 | `audio_duration_ms` | int nullable | |
@@ -617,6 +625,7 @@ version 1 ─ round 1 ──校验失败──> round 2(裁剪区域重读)─�
 | `dose_raw` | text | 原文剂量,如 `0.15克`、`50毫克`、`250毫升` |
 | `dose_value` / `dose_unit` | numeric / text nullable | 归一后 |
 | `concentration_pct` | numeric nullable | 浓度,如 `10`(表示 10%) |
+| `solute_mass_g` | numeric nullable | 浓度×体积派生的溶质量(15%×3mL=0.45g KCl) |
 | `frequency_raw` | text | **原文保留**,如 `ONCE`、`1天`、`每日一次` |
 | `route` | text | `静滴` / `静脉续滴` / `口服` / `肌注` |
 | `administration_group` | int nullable | **输液分组**,见下方 ⚠️ |
@@ -671,6 +680,7 @@ version 1 ─ round 1 ──校验失败──> round 2(裁剪区域重读)─�
 - **`name_raw` 存原文,`generic_name` 剥离采购信息。** 真实药名形如 `5%葡萄糖注射液(科伦250ml,23年集采)`、`15%氯化钾注射液(25年国采)` —— 括号里的厂家与集采批次对长期用药记录无价值,且会污染药名匹配
 - **`frequency_raw` 不做归一化解析。** 中英混排(`静滴 ONCE 1天`)的解析风险高、收益低,原文保留 + 可选打标签
 - **费用信息记录但不建模。** 输液单上有收费明细,存入 `extraction.structured` 即可,不建费用表 —— 除非明确需要报销/支出统计功能
+- **护士签名等执行凭证只记有无**,存 `extraction.structured`,不建列(fixture 003 回填)
 
 ### `metric_group` / `metric_group_item`
 
@@ -723,6 +733,7 @@ CREATE INDEX ON encounter (person_id, occurred_on DESC);
 
 -- 趋势查询(最热路径)
 CREATE INDEX ON observation (person_id, concept_code, collected_at DESC);
+CREATE UNIQUE INDEX ON observation (document_id, concept_code, series_key);  -- ADR-042
 
 -- 待处理队列
 CREATE INDEX ON document (status) WHERE status <> 'ready';

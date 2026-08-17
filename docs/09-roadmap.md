@@ -52,9 +52,9 @@
 
 - [ ] Claude 视觉调用封装 + prompt 版本管理
 - [ ] Stage 1:分类 + 元数据 + **全文提取**
-- [ ] **归人建议 + 强制人工确认**(见 [07 · API](./07-api-contract.md#归人建议可选前置调用))
-- [ ] facility 归一(别名表)
-- [ ] encounter 自动归组(同人 + 同日 + 同机构)
+- [ ] **本地归人确认 + 上传后 AI 对账告警(person_mismatch)**(ADR-041)(见 [07 · API](./07-api-contract.md#归人建议可选前置调用))
+- [ ] facility 归一(AI 判断 + normalization_decision 缓存,ADR-040)
+- [ ] encounter 自动归组建议(同人 + 同机构 + 时间窗,AI 判断,ADR-037/040)
 - [ ] 后台任务队列 + 状态查询
 - [ ] `stop_reason: refusal` 与失败降级处理
 
@@ -155,7 +155,7 @@
 - [ ] 批量导入工具(存量单据)
 - [ ] 数据导出(全量 zip + JSON)
 
-**验收:** 删掉整个数据库,能从 S3 完全重建,数据零丢失。
+**验收:** 删掉整个数据库,能从 S3 完全重建,**含人工层(修正/问答/归组/决策)零丢失**(design-debt D1)。
 
 ---
 
