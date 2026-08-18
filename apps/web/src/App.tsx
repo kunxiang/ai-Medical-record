@@ -75,9 +75,11 @@ export function App(): JSX.Element {
     // 动态 import:条件为编译期常量 false 时,Rollup 连同模块一起摇掉
     // ⇒ 生产产物不含 __amr 注入面(m1-99 B6)
     if (import.meta.env.VITE_M1_TEST_HOOKS === '1') {
-      void import('./test-hooks.js').then((m) => m.installTestHooks({ currentPerson: () => selected }));
+      void import('./test-hooks.js').then((m) =>
+        m.installTestHooks({ currentPerson: () => selected, notifyChanged: () => void refreshQueue() }),
+      );
     }
-  }, [selected]);
+  }, [selected, refreshQueue]);
 
   const onSelect = useCallback((p: Person) => {
     setSelected(p);

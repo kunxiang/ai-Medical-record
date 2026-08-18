@@ -7,6 +7,7 @@ import { setPause, type PauseSpec } from './offline/pause.js';
 
 export function installTestHooks(deps: {
   currentPerson: () => { id: string; slug: string; display_name: string } | null;
+  notifyChanged: () => void;   // 注入面直接写 IDB,需通知 React 刷新队列视图
 }): void {
   const fixtureBase = import.meta.env.VITE_FIXTURE_BASE ?? '/fixtures';
   // 离线用例需要在断网前把 fixture 读进内存(否则 enqueueFixture 的 fetch 必失败)
@@ -52,6 +53,7 @@ export function installTestHooks(deps: {
         await finalizeDraft(draftId);
         ids.push(draftId);
       }
+      deps.notifyChanged();
       return ids;
     },
     async queueSnapshot() {
@@ -73,10 +75,12 @@ export function installTestHooks(deps: {
     },
     async runQueue() {
       await tick('test');
+      deps.notifyChanged();
     },
     async clearAll() {
       const d = await db();
       await Promise.all([d.clear('captures'), d.clear('blobs'), d.clear('people_cache'), d.clear('kv')]);
+      deps.notifyChanged();
     },
   };
 }
