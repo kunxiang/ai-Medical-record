@@ -777,6 +777,8 @@ AI 读 → 确定性判定对错 → AI 带着判定结果重读 → 确定性�
 | `?lock` 子资源 | ❌ 501 —— R2 Bucket Locks **不经 S3 API 暴露** |
 | Cloudflare 控制面(`api.cloudflare.com`) | ⛔ 本开发环境的出网策略拒绝 CONNECT(403),无法从此处配置 |
 
+**一个值得庆幸的细节:** R2 对带 `x-amz-object-lock-mode` 头的 `PutObject` 返回 **501 拒绝**,而不是静默忽略。这意味着现有 `s3.ts`(`putObject`/`appendJsonl` 都传 `ObjectLockMode: 'GOVERNANCE'`)在 R2 上会**每次 L1 写入都硬失败**,不会出现"以为上了锁其实没上"的静默降级 —— 后者才是真正危险的。代价是:**在 ADR-048/049 的实现落地之前,本应用无法对 R2 运行**。
+
 **因此:** 补偿措施②(前缀级保留策略)**只能由项目所有者经 Cloudflare 控制台或 `wrangler r2 bucket lock` 配置**,或把 `api.cloudflare.com` 加进环境出网白名单后由脚本配置。在②与③落实之前,本桶不得承载生产 L1 —— `provision-bucket` 现在会把这一姿态原样打印,不再"自检通过"了事。
 
 **同批落地的实现改动:** `provision-bucket` 改为**探测后端能力再分流**(而非假定 S3 语义),并如实播报 WORM 姿态;`s3-admin` 的签名区域按后端选择(R2 须 `auto`),MinIO 的 Content-MD5 兼容中间件对 R2 关闭;CORS 的 `AllowedHeaders` 取并集(同时含 `x-amz-checksum-sha256` 与 `content-md5`)—— 少放一个头要重新取 admin 凭证,多放几个不构成风险,不对称,故取并集。
