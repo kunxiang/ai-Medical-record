@@ -20,3 +20,4 @@
 | D14 | **分片 + 断点续传**:M1 用整文件单 PUT + 整份重传;预签名 multipart 需三段式(create/part/complete)与服务端状态 | m1 spec 审核 #002(docs/01 §离线优先要点四) | M2 | 弱网下 50 MiB 文件可续传,不因中断整份重来 |
 | D15 | **M1 期错档的事后纠正**:已上传文档的归人纠正(correction-NNNN.json 写入路径)+ 连拍分组纠正(与 D7 同批)+ `from/to` 语义迁移(capture_date → date_field) | m1 spec 审核 #002 | M2 | M1 期产生的错档可纠正,S3 布局不受影响 |
 | D16 | **journal 回放能力**:rebuild 目前从不读 journal(M0/M1 的 journal 事件无 DB 落点);M3 的问答答案是第一个必须回放到 DB 的人工层事件 | m1 spec 审核 #002 | M3 | 删库重建后问答答案零丢失 |
+| D17 | **放弃上报的幂等台账仅是 L2**:`capture_discard_event` 表在删库重建后为空,重放窗口内的补报会写出第二行 `capture_discard`。journal 回放(D16)落地后台账可由 L1 自身重建,届时本表退化为缓存 | m1 验收(A8/A19) | M3(随 D16) | 重建后重放同一 `discard_event_id` 仍只产生一行 |
