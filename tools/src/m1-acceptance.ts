@@ -411,15 +411,18 @@ check('A16 服务端确实多了一份', (await docCount(token)) === docsBeforeR
 // ── A15 存储配额与持久化降级(独立 context:stub StorageManager)──
 console.log('A15 配额与持久化');
 const ctx2: BrowserContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
-await ctx2.addInitScript(() => {
-  Object.defineProperty(navigator, 'storage', {
+// ★ 必须走 content 字符串:函数形式会被 esbuild 的 keepNames 插入 __name() 辅助调用,
+//   而浏览器里没有该符号 —— init script 会静默 ReferenceError,stub 根本不生效。
+//   (quota 100 MiB / usage 99 MiB ⇒ 剩 1 MiB,不足 449 KB 原件的 3 倍)
+await ctx2.addInitScript({
+  content: `Object.defineProperty(navigator, 'storage', {
     configurable: true,
     value: {
-      persisted: async () => false,
-      persist: async () => false,
-      estimate: async () => ({ quota: 100 * 1024 * 1024, usage: 99 * 1024 * 1024 }),   // 剩 1 MB
+      persisted: function () { return Promise.resolve(false); },
+      persist: function () { return Promise.resolve(false); },
+      estimate: function () { return Promise.resolve({ quota: 104857600, usage: 103809024 }); },
     },
-  });
+  });`,
 });
 const page2 = await ctx2.newPage();
 await login(page2);
