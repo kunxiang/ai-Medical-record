@@ -6,13 +6,16 @@ import { tick } from './offline/queue.js';
 import { setPause, type PauseSpec } from './offline/pause.js';
 import { auth } from './api/client.js';
 
+// 离线用例需要在断网前把 fixture 读进内存(否则 enqueueFixture 的 fetch 必失败)。
+// ★ 必须是模块级:安装点是 useEffect(deps: [selected, ...]),换归属人会重装注入面 ——
+//   缓存若挂在闭包里,preload 与 enqueue 之间的一次重装就会把它清空。
+const cache = new Map<string, ArrayBuffer>();
+
 export function installTestHooks(deps: {
   currentPerson: () => { id: string; slug: string; display_name: string } | null;
   notifyChanged: () => void;   // 注入面直接写 IDB,需通知 React 刷新队列视图
 }): void {
   const fixtureBase = import.meta.env.VITE_FIXTURE_BASE ?? '/fixtures';
-  // 离线用例需要在断网前把 fixture 读进内存(否则 enqueueFixture 的 fetch 必失败)
-  const cache = new Map<string, ArrayBuffer>();
 
   async function fixtureBytes(name: string): Promise<ArrayBuffer> {
     const hit = cache.get(name);
