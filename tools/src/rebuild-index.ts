@@ -48,7 +48,7 @@ for (const key of personKeys) {
                         created_at, updated_at, archived_at)
     values (${p.id}, ${p.slug}, ${p.display_name}, ${p.name_pinyin}, ${p.birth_date},
             ${p.sex_at_birth}, ${p.gender}, ${p.relation_to_owner}, ${p.blood_type},
-            ${JSON.stringify(p.allergies)}::jsonb, ${JSON.stringify(p.chronic_conditions)}::jsonb, ${p.note},
+            ${sql.json(p.allergies)}, ${sql.json(p.chronic_conditions)}, ${p.note},
             ${p.created_at}, ${p.updated_at}, ${p.archived_at})
     on conflict (id) do nothing
   `;
