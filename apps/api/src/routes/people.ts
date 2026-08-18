@@ -11,7 +11,7 @@ import { db } from '../db/client.js';
 import { person, personAccess, personIdentifier } from '../db/schema.js';
 import { defineRoute } from '../define-route.js';
 import { ApiError, notFound } from '../errors.js';
-import { newId, personToApi, syncPersonToS3 } from '../person-service.js';
+import { lockPerson, newId, personToApi, syncPersonToS3 } from '../person-service.js';
 
 const PATCH_KEY_TO_COL = {
   display_name: 'displayName',
@@ -123,6 +123,7 @@ export function registerPeopleRoutes(app: FastifyInstance): void {
         if (col) sets[col] = v;
       }
       const sidecar = await db.transaction(async (tx) => {
+        await lockPerson(tx, id);
         await tx.update(person).set(sets).where(eq(person.id, id));
         return syncPersonToS3(tx, id, accountId);
       });
@@ -139,6 +140,7 @@ export function registerPeopleRoutes(app: FastifyInstance): void {
       // 归档 = 一次编辑,走完整五步(审核 #001 #16)
       await requirePersonAccess(accountId, input.id, 'owner');
       await db.transaction(async (tx) => {
+        await lockPerson(tx, input.id);
         await tx.update(person).set({ archivedAt: new Date(), updatedAt: new Date() }).where(eq(person.id, input.id));
         await syncPersonToS3(tx, input.id, accountId);
       });
@@ -157,6 +159,7 @@ export function registerPeopleRoutes(app: FastifyInstance): void {
       await requirePersonAccess(accountId, personId, 'editor');
       const identId = newId();
       await db.transaction(async (tx) => {
+        await lockPerson(tx, personId);
         await tx.insert(personIdentifier).values({
           id: identId, personId,
           facilityId: ident.facility_id,
@@ -184,6 +187,7 @@ export function registerPeopleRoutes(app: FastifyInstance): void {
         .where(and(eq(personIdentifier.id, input.iid), eq(personIdentifier.personId, input.id)));
       if (!rows[0]) throw notFound();
       await db.transaction(async (tx) => {
+        await lockPerson(tx, input.id);
         await tx.delete(personIdentifier).where(eq(personIdentifier.id, input.iid));
         await tx.update(person).set({ updatedAt: new Date() }).where(eq(person.id, input.id));
         await syncPersonToS3(tx, input.id, accountId);
