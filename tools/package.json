@@ -15,12 +15,15 @@
     "ci:deps": "tsx src/ci-deps.ts",
     "gen-m1-fixtures": "tsx src/gen-m1-fixtures.ts",
     "regen-derivatives": "tsx src/regen-derivatives.ts",
-    "m1:acceptance": "tsx src/m1-acceptance.ts"
+    "m1:acceptance": "tsx src/m1-acceptance.ts",
+    "probe-storage": "tsx src/probe-storage.ts",
+    "probe-presign": "tsx src/probe-presign.ts"
   },
   "dependencies": {
     "@amr/contracts": "workspace:*",
     "@amr/storage": "workspace:*",
     "@aws-sdk/client-s3": "^3.750.0",
+    "@aws-sdk/s3-request-presigner": "^3.1111.0",
     "@node-rs/argon2": "^2.0.2",
     "pdf-lib": "^1.17.1",
     "postgres": "^3.4.5",

@@ -726,3 +726,67 @@ AI 读 → 确定性判定对错 → AI 带着判定结果重读 → 确定性�
 - M1 期 `page_no := capture_order` 是**临时相等**,不是设计上的等价;实现者不得依赖这个巧合。
 
 **何时重新考虑:** 若将来允许"上传后重排页序并改名对象",则本 ADR 与 WORM 原则冲突,须先推翻 ADR-045。
+
+---
+
+## ADR-048 · Cloudflare R2 作为 L1/L2 统一后端,WORM 由前缀锁 + 仅创建写 + 冷备三者合成
+
+> 影响 [ADR-008](#adr-008)、[ADR-041](#adr-041)、[ADR-045](#adr-045--三层插件式架构),并要求 [ADR-049](#adr-049--journalmanifest-一事件一对象) 同批落地。
+
+**决策:** L1 与 L2 都落 Cloudflare R2。R2 缺失的服务端 WORM 强制,由三条补偿措施合成:①L1 全部对象一律 `If-None-Match: *` **仅创建**写;②R2 **Bucket Locks** 对 L1 前缀设保留策略;③异地冷备到一份独立副本。三条缺一不可 —— 尤其②,因为 R2 无版本化,一次误覆盖不可恢复。
+
+**背景:** 2026-08-18 对真实桶(`ai-medical-record`)跑 `pnpm probe-storage` / `probe-presign`,实测能力如下(证据是 R2 自己的响应码,非文档转述):
+
+| 能力 | 结果 | 说明 |
+|---|---|---|
+| 条件写 `If-None-Match: *` / `If-Match`(含 412) | ✅ 完整 | **最关键的一条**:并发追加与仅创建语义都成立 |
+| `PutObject` + `ChecksumSHA256`(服务端路径) | ✅ | |
+| `CopyObject`(`_incoming` → 最终 key) | ✅ | 搬运链不变 |
+| Multipart | ✅ | D14 可做 |
+| 预签名 PUT | ⚠️ 可用,但**不得携带 `x-amz-checksum-sha256`** | 带该头必 403 `SignatureDoesNotMatch`(7 种变体逐一验证) |
+| 预签名 PUT + `Content-MD5` | ✅ 且**真的强制**(错误摘要 → 400) | 直传完整性闸门的替代品 |
+| 对象版本化 / `ListObjectVersions` | ❌ **501 NotImplemented** | 覆盖即永久丢失;A17 的 `(Key,VersionId,ETag)` 取证手段失效 |
+| `PutObjectRetention`(逐对象治理模式) | ❌ **501 NotImplemented** | docs/04 §1 的 object-lock 列失去服务端逐对象强制 |
+| 桶配置类(versioning/objectlock/cors/lifecycle) | ⚠️ 403 AccessDenied | 疑为 token 权限档次(需 **Admin Read & Write**),待复验 |
+
+**为什么仍选 R2:** ①条件写是本项目并发模型的地基(journal/manifest 追加、幂等仅创建),它完整可用;②R2 有 **Bucket Locks**(前缀级保留,防删防覆盖,最多 1000 条规则),我们的 key 布局本就是前缀结构化的,天然可映射;③出网免费,而本应用的读取模式是持续取原图与派生物。
+
+**必须诚实记录的代价:**
+
+- R2 Bucket Locks **没有** compliance 模式与 legal hold,也无合规认证。它挡的是"误删/误覆盖",不是"持有凭证者蓄意销毁"。
+- 无版本化 ⇒ **锁不是可选项**。没有锁的前缀,一次带 bug 的裸 PUT 就是永久数据丢失,连"回滚到上一版本"都没有。
+- 逐对象保留期(不同对象不同到期)退化为按前缀统一保留期。
+
+**后果:**
+
+1. **上传链的校验和改道:**预签名 PUT 改签 `Content-MD5`(客户端在算 sha256 之外再算一次 MD5);服务端在登记步骤**下载并重算 sha256**,与客户端申报值比对,取代原先"读回存储侧 `ChecksumSHA256`"。这一改动使校验**不再依赖后端是否实现 flexible checksum**,反而更硬 —— 验的是真实字节。R2 出网免费,单页 ≤50 MiB,代价可接受。
+2. **A17 取证手段替换:**`ListObjectVersions` 不可用,改用 `_index/l1-digest.jsonl`(key + sha256 + bytes 的清单,可完全从 `capture.json`/`page-NN.json` 重建)。这与 ADR-045 自洽:取证凭据本身也必须是 L1 可重建的。
+3. **journal/manifest 必须改为一事件一对象**(ADR-049)—— 读-改-写在无版本化的后端上是不可接受的,且它与前缀锁直接冲突。
+4. `provision-bucket` 需按后端分流:MinIO 走 Object Lock,R2 走 Bucket Locks;两者都必须跑**行为自检**而非配置自检(沿用 m1/CHANGES #2 的教训)。
+5. 冷备是**必须项**而非增强项,且必须落到支持 Object Lock 的存储或离线介质。L1 可整体打包迁移(ADR-045 的设计红利)使这件事成本很低。
+
+**未决(需 Admin 档 token 复验):** Bucket Locks 能否覆盖全部 L1 前缀、CORS 与 lifecycle 能否经 S3 API 配置。在复验通过前,本 ADR 不得视为已落地。
+
+---
+
+## ADR-049 · journal/manifest 一事件一对象
+
+> 由 [ADR-048](#adr-048) 触发;修订 [ADR-040](#adr-040) 与 docs/04 §5 的追加写方式。
+
+**决策:** `people/{slug}/journal/{YYYY}-{MM}.jsonl` 与 `_index/manifests/{YYYY}-{MM}.jsonl` 由"单文件读-改-写追加"改为**一事件一对象**:`people/{slug}/journal/{YYYY}-{MM}/{at}__{event_id}.json`、`_index/manifests/{YYYY}-{MM}/{created_at}__{event_id}.json`,一律 `If-None-Match: *` 仅创建。
+
+**背景:** 现行 `appendJsonl` 是读整份 → 拼接 → 带 `If-Match` 整份回写。这套做法在 S3 + 版本化 + 治理锁下是自洽的:每次追加产生新版本,旧版本被锁住留存,历史仍是 WORM。**把版本化拿掉,这个前提就塌了** —— 回写会不可恢复地覆盖历史,而若给该前缀加保留锁,回写本身会被拒。两条路都走不通。
+
+**为什么这不只是"迁就 R2",而是本来就更对:**
+
+- 追加变成**天然幂等**:`event_id` 就是 key,重复上报直接 412,不需要台账(D17 因此可提前清偿)。
+- 消除读-改-写窗口,`pg_advisory_xact_lock` 不再需要承担"保证 S3 回写顺序 == DB 提交顺序"的职责(M0 验收 A10×B5 抓到的那个缺陷,其成因整个消失)。
+- 每个事件对象**写入即不可变**,可以直接进前缀锁 —— L1 的 append-only 从"应用约定"升级为"存储强制"。
+
+**代价与缓解:** 对象数量增加,读一个月的 journal 从 1 次 GET 变成 1 次 LIST + N 次 GET。缓解:journal 是低频读;需要连续视图时,由 L2 物化一份紧凑投影(可重建,不进权威矩阵的 L1 行)。
+
+**后果:**
+
+- `buildKey.journal` / `buildKey.manifest` 签名变更,`parseKey` 与权威矩阵同步更新;`_meta/README.md` 的自述需说明新布局(否则第三方拿到桶读不懂)。
+- `rebuild-index` 的 manifest 回放从"逐行"改为"逐对象",`event_id` 幂等逻辑不变。
+- 迁移:M0/M1 期已产生的 `.jsonl` 保留原样并在 `_meta/README.md` 标注为历史布局;回放需同时认两种布局(旧只读)。

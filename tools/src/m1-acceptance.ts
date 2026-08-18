@@ -428,7 +428,8 @@ const page2 = await ctx2.newPage();
 await login(page2);
 // 先证明 stub 真的生效 —— 否则下面两条断言可能只是"真实环境配额很大所以没报错"
 const est = await page2.evaluate(async () => {
-  const e = await navigator.storage.estimate();
+  const e = await (navigator as unknown as { storage: { estimate: () => Promise<{ quota?: number; usage?: number }> } })
+    .storage.estimate();
   return { quota: e.quota ?? -1, usage: e.usage ?? -1 };
 });
 check('A15 StorageManager stub 生效', est.quota === 100 * 1024 * 1024 && est.usage === 99 * 1024 * 1024,
