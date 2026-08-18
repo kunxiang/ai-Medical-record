@@ -3,7 +3,7 @@
 // fixtures 生成、web 构建(VITE_M1_TEST_HOOKS=1)、API + 静态服务启动。
 import { createHash } from 'node:crypto';
 import { execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, ListObjectVersionsCommand } from '@aws-sdk/client-s3';
@@ -99,7 +99,12 @@ async function login(page: Page): Promise<void> {
 }
 
 // ════════════════════════════ 开始 ════════════════════════════
-const browser: Browser = await chromium.launch();
+// 环境预装的浏览器 build 与 playwright 版本可能不匹配 —— 显式指定可执行路径
+// (环境约定:PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers,禁止 playwright install)
+const CHROME_PATH = process.env.CHROME_PATH ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const browser: Browser = await chromium.launch(
+  existsSync(CHROME_PATH) ? { executablePath: CHROME_PATH } : {},
+);
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
 const page = await ctx.newPage();
 page.on('console', (m) => { if (m.type() === 'error') console.error('    [browser]', m.text().slice(0, 200)); });
