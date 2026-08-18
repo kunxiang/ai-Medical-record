@@ -133,7 +133,7 @@ for (const [shortId, st] of docState) {
       insert into document_page (id, document_id, page_no, storage_key, content_sha256, byte_size,
                                  mime_type, width, height, capture_order)
       values (${uuidv7()}, ${cap.document_id}, ${pg.page_no}, ${st.prefix + pg.file}, ${pg.sha256},
-              ${pg.bytes}, ${pg.mime}, ${pg.width}, ${pg.height}, ${pg.page_no})
+              ${pg.bytes}, ${pg.mime}, ${pg.width}, ${pg.height}, ${pg.capture_order})
       on conflict (document_id, page_no) do nothing
     `;
   }

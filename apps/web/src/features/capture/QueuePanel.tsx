@@ -68,7 +68,7 @@ export function QueuePanel({
                 )}
               </div>
             )}
-            {['draft', 'pending_person', 'pending', 'failed_terminal'].includes(q.state) && people.length > 1 && (
+            {['draft', 'pending_person', 'pending', 'failed_terminal'].includes(q.state) && people.length > 0 && (
               <div className="row">
                 <label className="muted">改归属:</label>
                 {people.map((p) => (

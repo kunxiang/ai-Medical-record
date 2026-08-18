@@ -7,6 +7,7 @@ import { DocumentSource, MimeType } from './enums.js';
 export const CapturePage = z
   .object({
     page_no: z.number().int().min(1),
+    capture_order: z.number().int().min(1),   // ADR-047:拍摄序,拍摄瞬间即知的 L1 事实
     file: z.string(),
     sha256: Sha256Hex,
     bytes: z.number().int().min(1),

@@ -139,8 +139,9 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
 
       // 3+4. 逐页 Head 校验 → Head-then-Copy 搬运
       type PageStaged = {
-        pageNo: number; finalKey: string; mime: Mime; byteSize: number;
+        pageNo: number; captureOrder: number; finalKey: string; mime: Mime; byteSize: number;
         sha256: string; width: number; height: number; incomingKey: string; filename: string;
+        exif: { captured_at: string | null; orientation: number | null } | null;
       };
       const staged: PageStaged[] = [];
       for (const p of input.pages) {
@@ -155,9 +156,9 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
           const final = await headObject(finalKey);
           if (final && final.checksumSha256Base64 === hexToBase64(f.sha256)) {
             staged.push({
-              pageNo: p.page_no, finalKey, mime, byteSize: final.byteSize,
+              pageNo: p.page_no, captureOrder: p.capture_order, finalKey, mime, byteSize: final.byteSize,
               sha256: f.sha256, width: p.width, height: p.height,
-              incomingKey: f.incomingKey, filename: f.filename,
+              incomingKey: f.incomingKey, filename: f.filename, exif: p.exif,
             });
             continue;
           }
@@ -188,8 +189,9 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
           await copyWithLock(f.incomingKey, finalKey, f.mimeType);
         }
         staged.push({
-          pageNo: p.page_no, finalKey, mime, byteSize: f.byteSize, sha256: f.sha256,
-          width: p.width, height: p.height, incomingKey: f.incomingKey, filename: f.filename,
+          pageNo: p.page_no, captureOrder: p.capture_order, finalKey, mime, byteSize: f.byteSize,
+          sha256: f.sha256, width: p.width, height: p.height,
+          incomingKey: f.incomingKey, filename: f.filename, exif: p.exif,
         });
       }
       crashPoint('after-copy'); // A8 崩溃注入点(仅测试)
@@ -217,7 +219,7 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
           schema_version: '2.0', document_short_id: docShortId, page_no: s.pageNo,
           file: `page-${String(s.pageNo).padStart(2, '0')}.${MIME_TO_EXT[s.mime]}`,
           sha256: s.sha256, bytes: s.byteSize, mime: s.mime,
-          width: s.width, height: s.height, exif: null,
+          width: s.width, height: s.height, exif: s.exif,
         });
         await putWormIdempotent(
           buildKey.pageMeta({ personSlug, captureDate, docShortId, pageNo: s.pageNo }),
@@ -226,13 +228,14 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
       }
       const capture = CaptureSidecar.parse({
         schema_version: '2.0', document_id: documentId, short_id: docShortId,
-        person: { slug: personSlug, name: personRow.displayName, confirmed_by: 'api' },
+        person: { slug: personSlug, name: personRow.displayName, confirmed_by: input.confirmed_by },
         captured_at: input.captured_at, capture_date: captureDate,
         source: input.source, uploaded_by: accountId,
         client_document_id: input.client_document_id,
         original_filename: firstFile.filename,
         pages: staged.map((s) => ({
-          page_no: s.pageNo, file: `page-${String(s.pageNo).padStart(2, '0')}.${MIME_TO_EXT[s.mime]}`,
+          page_no: s.pageNo, capture_order: s.captureOrder,
+          file: `page-${String(s.pageNo).padStart(2, '0')}.${MIME_TO_EXT[s.mime]}`,
           sha256: s.sha256, bytes: s.byteSize, mime: s.mime, width: s.width, height: s.height,
         })),
         created_at: createdAt,
@@ -256,7 +259,7 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
           staged.map((s) => ({
             id: newId(), documentId, pageNo: s.pageNo, storageKey: s.finalKey,
             contentSha256: s.sha256, byteSize: s.byteSize, mimeType: s.mime,
-            width: s.width, height: s.height, captureOrder: s.pageNo,
+            width: s.width, height: s.height, captureOrder: s.captureOrder,
           })),
         );
         await tx
