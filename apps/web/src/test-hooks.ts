@@ -9,19 +9,33 @@ export function installTestHooks(deps: {
   currentPerson: () => { id: string; slug: string; display_name: string } | null;
 }): void {
   const fixtureBase = import.meta.env.VITE_FIXTURE_BASE ?? '/fixtures';
+  // 离线用例需要在断网前把 fixture 读进内存(否则 enqueueFixture 的 fetch 必失败)
+  const cache = new Map<string, ArrayBuffer>();
+
+  async function fixtureBytes(name: string): Promise<ArrayBuffer> {
+    const hit = cache.get(name);
+    if (hit) return hit;
+    const res = await fetch(`${fixtureBase}/${name}`);
+    if (!res.ok) throw new Error(`fixture 不存在: ${name}`);
+    const buf = await res.arrayBuffer();
+    cache.set(name, buf);
+    return buf;
+  }
 
   (window as unknown as Record<string, unknown>)['__amr'] = {
+    async preloadFixtures(names: string[]) {
+      for (const n of names) await fixtureBytes(n);
+      return names.length;
+    },
     async enqueueFixture(name: string, opts?: { count?: number; personId?: string | null; asOneDocument?: boolean }) {
       const count = opts?.count ?? 1;
       const person = opts?.personId === null ? null : deps.currentPerson();
       const ids: string[] = [];
       let draftId: string | undefined;
       for (let i = 0; i < count; i++) {
-        const res = await fetch(`${fixtureBase}/${name}`);
-        if (!res.ok) throw new Error(`fixture 不存在: ${name}`);
-        const blob = await res.blob();
+        const bytes = await fixtureBytes(name);
         const mime = name.endsWith('.png') ? 'image/png' : name.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg';
-        const file = new File([blob], name, { type: mime });
+        const file = new File([bytes], name, { type: mime });
         const page = await preparePage(file);
         const rec = await appendDraftPage({
           draftId: opts?.asOneDocument ? draftId : undefined,

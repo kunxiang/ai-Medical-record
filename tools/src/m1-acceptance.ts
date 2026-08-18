@@ -146,6 +146,12 @@ check('A1 people_cache 不含医疗 PII', !cachedFields.includes('allergies') &&
 
 // ── A2 离线拍 5 张 ──
 console.log('A2 离线采集');
+// 断网前把 fixture 读进内存(注入面用 fetch 取文件,断网后取不到)
+const preloaded = await page.evaluate(
+  (names) => (globalThis as any).__amr.preloadFixtures(names) as Promise<number>,
+  ['photo-plain.png', 'photo-gps-o6.jpg', 'page-1.jpg', 'page-2.jpg', 'page-3.jpg', 'doc-1page.pdf', 'huge.jpg'],
+);
+check('A2 fixture 预加载', preloaded === 7, `${preloaded}`);
 await ctx.setOffline(true);
 await page.evaluate(() => (globalThis as any).__amr.enqueueFixture('photo-plain.png', { count: 5 }));
 let snap = await snapshot(page);
