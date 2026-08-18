@@ -17,6 +17,9 @@ cleanup() {
 trap 'cleanup "${KEEP:-}"' EXIT
 KEEP="${1:-}"
 
+echo "== 清场(验收必须从洁净环境起跑)=="
+$COMPOSE down -v >/dev/null 2>&1 || true
+
 echo "== compose up =="
 $COMPOSE up -d --wait
 
