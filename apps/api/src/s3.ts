@@ -7,6 +7,8 @@ import { env, LOCK_RETENTION_YEARS, PROBE_RETENTION_MS } from './env.js';
 import { buildKey } from '@amr/storage';
 
 export const s3 = new S3Client({
+  // MinIO 对新版 SDK 默认附加的 CRC32 校验和头返回 501;显式的 ChecksumSHA256 仍会发送
+  requestChecksumCalculation: 'WHEN_REQUIRED',
   endpoint: env.s3.endpoint,
   region: env.s3.region,
   forcePathStyle: true,
