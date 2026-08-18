@@ -145,7 +145,9 @@ export async function presignGet(key: string): Promise<string> {
 
 /** 启动探针(spec m0-04 §3):任一断言失败 → 抛错拒绝启动。 */
 export async function startupProbe(): Promise<void> {
-  const key = buildKey.probe('startup');
+  // 实例唯一后缀:多实例并发启动时探针互不干扰(specs/m0/CHANGES.md #2)
+  const suffix = Math.random().toString(36).slice(2, 10);
+  const key = buildKey.probe('startup', suffix);
   const body1 = Buffer.from('probe-1\n');
   const body2 = Buffer.from('probe-2\n');
 
@@ -186,7 +188,7 @@ export async function startupProbe(): Promise<void> {
   if (!badChecksum) throw new Error('探针失败:错误 sha256 校验和未被拒绝');
 
   // 4. CopyObject 附锁参数 → 回读 GOVERNANCE(lock-probe,最短保留,留置)
-  const lockKey = buildKey.probe('lock-probe');
+  const lockKey = buildKey.probe('lock-probe', suffix);
   const until = new Date(Date.now() + PROBE_RETENTION_MS);
   await s3.send(new CopyObjectCommand({
     Bucket: B, Key: lockKey, CopySource: `${B}/${key}`,

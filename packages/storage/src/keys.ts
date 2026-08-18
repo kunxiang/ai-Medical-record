@@ -55,7 +55,8 @@ export const buildKey = {
   manifest: (p: { year: string; month: string }) => check(`_index/manifests/${p.year}-${p.month}.jsonl`),
   peopleMap: () => `_index/people.json`,
   incoming: (p: { batchId: string; uploadId: string }) => check(`_incoming/${p.batchId}/${p.uploadId}`),
-  probe: (name: 'startup' | 'lock-probe') => `_probe/${name}`,
+  probe: (name: 'startup' | 'lock-probe', suffix?: string) =>
+    check(`_probe/${name}${suffix ? '-' + suffix : ''}`),
   // derived 构造器:M0 仅预留(spec m0-03 §5.5)
   derivedMeta: (p: { personSlug: string; docShortId: string }) =>
     check(`derived/${p.personSlug}/${p.docShortId}/meta.json`),
@@ -101,7 +102,10 @@ const MATCHERS: Array<[RegExp, (m: RegExpExecArray) => ParsedKey]> = [
     new RegExp(`^_incoming/(${UUID})/(${UUID})$`),
     (m) => ({ kind: 'incoming', batchId: m[1]!, uploadId: m[2]! }),
   ],
-  [new RegExp(`^_probe/(startup|lock-probe)$`), (m) => ({ kind: 'probe', name: m[1]! as 'startup' | 'lock-probe' })],
+  [
+    new RegExp(`^_probe/(startup|lock-probe)(?:-[a-z0-9]{1,16})?$`),
+    (m) => ({ kind: 'probe', name: m[1]! as 'startup' | 'lock-probe' }),
+  ],
 ];
 
 export function parseKey(key: string): ParsedKey {
