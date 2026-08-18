@@ -1,0 +1,31 @@
+:root { font-family: system-ui, -apple-system, "PingFang SC", sans-serif; color-scheme: light dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #fafafa; color: #111; }
+.app { max-width: 720px; margin: 0 auto; padding: 12px; }
+.topbar { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; }
+.topbar nav button { margin-left: 8px; padding: 6px 12px; border: 1px solid #ccc; background: #fff; border-radius: 999px; }
+.topbar nav button.on { background: #0f766e; color: #fff; border-color: #0f766e; }
+.banner { padding: 8px 12px; border-radius: 8px; margin: 8px 0; }
+.banner.warn { background: #fff7ed; border: 1px solid #fdba74; color: #9a3412; }
+.error { color: #b91c1c; }
+.error.small { font-size: 12px; }
+.muted { color: #6b7280; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+.chip { padding: 6px 12px; border-radius: 999px; border: 1px solid #ccc; background: #fff; }
+.chip.on { background: #0f766e; color: #fff; border-color: #0f766e; }
+.shoot { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+.shoot button, .queue button, .browse button { padding: 10px 16px; border-radius: 8px; border: 1px solid #ccc; background: #fff; }
+button.primary { background: #0f766e; color: #fff; border-color: #0f766e; }
+button.danger { color: #b91c1c; border-color: #fca5a5; }
+.status { padding: 8px 0; }
+.queue ul { list-style: none; padding: 0; }
+.queue li { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; margin-bottom: 8px; background: #fff; }
+.queue .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.state { font-weight: 600; }
+.login { max-width: 320px; margin: 15vh auto; display: flex; flex-direction: column; gap: 10px; }
+.login input { padding: 10px; border: 1px solid #ccc; border-radius: 8px; }
+.login button { padding: 10px; border-radius: 8px; border: none; background: #0f766e; color: #fff; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
+.card { display: block; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; background: #fff; text-decoration: none; color: inherit; }
+.card img { width: 100%; height: 200px; object-fit: cover; display: block; background: #f3f4f6; }
+.placeholder { height: 200px; display: grid; place-items: center; background: #f3f4f6; color: #6b7280; }

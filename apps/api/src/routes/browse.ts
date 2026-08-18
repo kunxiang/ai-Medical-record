@@ -86,8 +86,12 @@ export function registerBrowseRoutes(app: FastifyInstance): void {
     defineRoute(app, {
       method: 'GET',
       url: `/api/v1/documents/:id/pages/:n/${variant}`,
-      input: z.object({ id: Uuid, n: z.coerce.number().int().min(1) }),
+      input: z.object({
+        id: Uuid, n: z.coerce.number().int().min(1),
+        access_token: z.string().optional(),   // <img> 无法带 Authorization 头(m1/CHANGES #1)
+      }),
       output: z.unknown(),
+      auth: 'bearer-or-query',
       handler: async ({ input, accountId, reply }) => {
         await requireDocumentAccess(accountId, input.id, 'viewer');
         const rows = await db

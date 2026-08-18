@@ -26,8 +26,8 @@ export function defineRoute<InS extends z.ZodTypeAny, OutS extends z.ZodTypeAny>
     url: string;
     input: InS;
     output: OutS;
-    /** 'none' 仅用于 login */
-    auth?: 'bearer' | 'none';
+    /** 'none' 仅用于 login;'bearer-or-query' 仅用于派生物端点(<img> 无法带头,见 m1/CHANGES #1) */
+    auth?: 'bearer' | 'bearer-or-query' | 'none';
     status?: number;
     handler: (ctx: RouteCtx<z.infer<InS>>) => Promise<unknown>;
   },
@@ -39,8 +39,14 @@ export function defineRoute<InS extends z.ZodTypeAny, OutS extends z.ZodTypeAny>
       let accountId = '';
       if (opts.auth !== 'none') {
         const h = req.headers.authorization;
-        if (!h?.startsWith('Bearer ')) throw new ApiError('unauthenticated', '缺少凭证');
-        const claims = await verifyToken(h.slice(7));
+        let raw: string | undefined;
+        if (h?.startsWith('Bearer ')) raw = h.slice(7);
+        else if (opts.auth === 'bearer-or-query') {
+          const q = (req.query as Record<string, unknown>)['access_token'];
+          if (typeof q === 'string') raw = q;
+        }
+        if (!raw) throw new ApiError('unauthenticated', '缺少凭证');
+        const claims = await verifyToken(raw);
         // D12(m1-02 §6):epoch 与库中不符 ⇒ 该 token 已被改密码作废
         const rows = await db
           .select({ epoch: account.tokenEpoch })

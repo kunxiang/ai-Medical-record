@@ -190,3 +190,11 @@ export const CaptureDiscardRequest = z.object({
   detail: z.string().max(500).nullable().default(null),
 });
 export const CaptureDiscardResponse = z.object({ recorded: z.literal(true) });
+
+export type DocumentCreateT = z.infer<typeof DocumentCreate>;
+export type DocumentOutT = z.infer<typeof DocumentOut>;
+export type DocumentListItemT = z.infer<typeof DocumentListItem>;
+export type DocumentListResponseT = z.infer<typeof DocumentListResponse>;
+export type PresignResponseT = z.infer<typeof PresignResponse>;
+export type CaptureDiscardRequestT = z.infer<typeof CaptureDiscardRequest>;
+export type PageInT = z.infer<typeof PageIn>;

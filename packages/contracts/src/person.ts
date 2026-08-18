@@ -70,3 +70,5 @@ export const PersonListResponse = z.object({ people: z.array(Person) });
 
 export type PersonT = z.infer<typeof Person>;
 export type PersonSidecarT = z.infer<typeof PersonSidecar>;
+
+export type PersonListResponseT = z.infer<typeof PersonListResponse>;

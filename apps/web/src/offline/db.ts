@@ -1,0 +1,140 @@
+import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
+
+// spec m1-04 §1:四个 store。原件 blob 与元数据分表 —— 元数据频繁读写(状态机、
+// 重试计数),blob 只在上传时读一次;分开可避免每次状态更新都搬运几 MB。
+
+export type CaptureState =
+  | 'draft'            // 累积面板中,尚未定稿
+  | 'pending_person'   // 已定稿但未选人(离线且人员缓存缺失)
+  | 'pending'
+  | 'uploading'
+  | 'registering'
+  | 'pending_discard'  // 用户已放弃,等待联网上报
+  | 'failed_terminal';
+
+export interface CaptureRecord {
+  client_document_id: string;      // ★ 拍摄瞬间生成的 uuid v7,幂等锚点,终生不变
+  person_id: string | null;
+  person_slug: string | null;
+  person_display_name: string | null;
+  source: 'camera' | 'album' | 'pdf';
+  captured_at: string;             // EXIF DateTimeOriginal 优先,否则入队时刻
+  captured_at_from_exif: boolean;
+  page_count: number;
+  state: CaptureState;
+  attempt: number;
+  next_attempt_at: number;
+  last_error: { stage: 'presign' | 'put' | 'register'; code: string; message: string; at: string } | null;
+  batch: {
+    batch_id: string;
+    uploads: Array<{ page_no: number; upload_id: string; url: string; headers: Record<string, string>; expires_at: string }>;
+  } | null;
+  discard_event_id: string | null;
+  created_at: string;
+  context: null;                   // M3 预留
+}
+
+export interface BlobRecord {
+  client_document_id: string;
+  page_no: number;
+  blob: Blob;                      // ★ 必须是物化的 Blob,不是 File(审核 #002 A-9)
+  byte_size: number;
+  sha256: string;
+  mime_type: string;
+  width: number;
+  height: number;
+  capture_order: number;
+  filename: string;
+  exif: { captured_at: string | null; orientation: number | null } | null;
+}
+
+export interface PersonCacheRecord {
+  id: string;
+  slug: string;
+  display_name: string;
+  relation_to_owner: string;
+  // ★ 只缓存这四项:选择器不需要过敏史/生日,而它们是医疗 PII(m1-04 §5)
+}
+
+interface AmrDB extends DBSchema {
+  captures: { key: string; value: CaptureRecord; indexes: { idx_state: string; idx_created: string } };
+  blobs: { key: [string, number]; value: BlobRecord };
+  people_cache: { key: string; value: PersonCacheRecord };
+  kv: { key: string; value: { k: string; v: unknown } };
+}
+
+let dbPromise: Promise<IDBPDatabase<AmrDB>> | null = null;
+
+export function db(): Promise<IDBPDatabase<AmrDB>> {
+  dbPromise ??= openDB<AmrDB>('amr-capture', 1, {
+    upgrade(d) {
+      const captures = d.createObjectStore('captures', { keyPath: 'client_document_id' });
+      captures.createIndex('idx_state', 'state');
+      captures.createIndex('idx_created', 'created_at');
+      d.createObjectStore('blobs', { keyPath: ['client_document_id', 'page_no'] });
+      d.createObjectStore('people_cache', { keyPath: 'id' });
+      d.createObjectStore('kv', { keyPath: 'k' });
+    },
+  });
+  return dbPromise;
+}
+
+export async function kvGet<T>(k: string): Promise<T | undefined> {
+  const row = await (await db()).get('kv', k);
+  return row?.v as T | undefined;
+}
+export async function kvSet(k: string, v: unknown): Promise<void> {
+  await (await db()).put('kv', { k, v });
+}
+
+/** 2xx 后:同一个跨两 store 的事务里删除元数据与 blob(m1-04 §2.5)。
+ *  ⚠️ 网络调用必须在事务之外完成 —— IDB 事务在让出事件循环时自动提交。 */
+export async function deleteCaptureCompletely(id: string, pageCount: number): Promise<void> {
+  const d = await db();
+  const tx = d.transaction(['captures', 'blobs'], 'readwrite');
+  await tx.objectStore('captures').delete(id);
+  const blobs = tx.objectStore('blobs');
+  for (let p = 1; p <= pageCount; p++) await blobs.delete([id, p]);
+  await tx.done;
+}
+
+export async function putCapture(rec: CaptureRecord): Promise<void> {
+  await (await db()).put('captures', rec);
+}
+export async function getCapture(id: string): Promise<CaptureRecord | undefined> {
+  return (await db()).get('captures', id);
+}
+export async function allCaptures(): Promise<CaptureRecord[]> {
+  return (await db()).getAll('captures');
+}
+export async function getBlob(id: string, pageNo: number): Promise<BlobRecord | undefined> {
+  return (await db()).get('blobs', [id, pageNo]);
+}
+export async function putBlob(rec: BlobRecord): Promise<void> {
+  await (await db()).put('blobs', rec);
+}
+export async function blobsOf(id: string, pageCount: number): Promise<BlobRecord[]> {
+  const out: BlobRecord[] = [];
+  for (let p = 1; p <= pageCount; p++) {
+    const b = await getBlob(id, p);
+    if (b) out.push(b);
+  }
+  return out;
+}
+
+/** 崩溃恢复(m1-04 §2.6):uploading/registering 一律回退为 pending;
+ *  draft / pending_person / failed_terminal / pending_discard 保持不动。 */
+export async function recoverAfterRestart(): Promise<number> {
+  const d = await db();
+  const tx = d.transaction('captures', 'readwrite');
+  let n = 0;
+  for await (const cursor of tx.store) {
+    const rec = cursor.value;
+    if (rec.state === 'uploading' || rec.state === 'registering') {
+      await cursor.update({ ...rec, state: 'pending', batch: null, next_attempt_at: 0 });
+      n += 1;
+    }
+  }
+  await tx.done;
+  return n;
+}
