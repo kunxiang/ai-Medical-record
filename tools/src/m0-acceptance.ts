@@ -112,6 +112,13 @@ const token: string = login.json.access_token;
 const bad1 = await api('POST', '/api/v1/auth/login', { body: { email: EMAIL, password: 'wrong-password' } });
 const bad2 = await api('POST', '/api/v1/auth/login', { body: { email: 'nobody@local.test', password: 'wrong-password' } });
 check('A3 错密码/不存在邮箱均 401 且响应体字节级一致', bad1.status === 401 && bad2.status === 401 && bad1.text === bad2.text);
+// B 账号在限流洪水前登录(否则同 IP 60s 窗口内 429,A9 拿不到 token)
+execSync('pnpm --silent run seed-account', {
+  stdio: 'pipe',
+  env: { ...process.env, SEED_EMAIL: 'other@local.test', SEED_PASSWORD: 'other-password-001' },
+});
+const loginB = await api('POST', '/api/v1/auth/login', { body: { email: 'other@local.test', password: 'other-password-001' } });
+const tokenB: string = loginB.json.access_token;
 let got429 = false;
 for (let i = 0; i < 12; i++) {
   const r = await api('POST', '/api/v1/auth/login', { body: { email: EMAIL, password: 'x'.repeat(8) } });
@@ -225,12 +232,6 @@ await (async () => {
 
 // ══════════════ A9 越权 ══════════════
 console.log('A9 越权');
-execSync('pnpm --silent run seed-account', {
-  stdio: 'pipe',
-  env: { ...process.env, SEED_EMAIL: 'other@local.test', SEED_PASSWORD: 'other-password-001' },
-});
-const loginB = await api('POST', '/api/v1/auth/login', { body: { email: 'other@local.test', password: 'other-password-001' } });
-const tokenB: string = loginB.json.access_token;
 const bPerson = await api('GET', `/api/v1/people/${personId}`, { token: tokenB });
 const bDoc = await api('GET', `/api/v1/documents/${docId}`, { token: tokenB });
 const bPage = await api('GET', `/api/v1/documents/${docId}/pages/1/url`, { token: tokenB });
@@ -331,7 +332,7 @@ check('A11 _person.json 含 archived_at(死档不复活的前提)', archivedPers
 execSync('npx tsx src/verify-rebuild.ts --dump /tmp/m0-snapshot.json', { stdio: 'pipe' });
 const REPO_ROOT = process.env.REPO_ROOT ?? new URL('../..', import.meta.url).pathname;
 execSync(
-  `docker compose -f ${REPO_ROOT}/infra/docker-compose.yml exec -T postgres psql -U amr -d amr -q -c 'drop schema public cascade; create schema public;'`,
+  `docker compose -f ${REPO_ROOT}/infra/docker-compose.yml exec -T postgres psql -U amr -d amr -q -c 'drop schema public cascade; create schema public; drop schema if exists drizzle cascade;'`,
   { stdio: 'pipe' },
 );
 execSync('pnpm --filter @amr/api --silent run db:migrate', { stdio: 'pipe', cwd: REPO_ROOT });

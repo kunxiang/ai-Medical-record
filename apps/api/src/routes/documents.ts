@@ -86,7 +86,7 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
     input: DocumentCreate,
     output: DocumentOut,
     status: 201,
-    handler: async ({ input, accountId }) => {
+    handler: async ({ input, accountId, setStatus }) => {
       // 0
       await requirePersonAccess(accountId, input.person_id, 'editor');
       if (!capturedAtInRange(input.captured_at, new Date())) {
@@ -105,7 +105,10 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
       if (existing[0]) {
         const prior = await loadDocumentOut(existing[0].id);
         const priorPayload = existing[0].columnSet as { m0_payload?: string } | null;
-        if (priorPayload?.m0_payload === payloadBytes) return prior;
+        if (priorPayload?.m0_payload === payloadBytes) {
+          setStatus(200); // 幂等命中(spec m0-06 §3)
+          return prior;
+        }
         throw new ApiError('duplicate_client_document_id', '幂等键冲突且 payload 不同');
       }
 

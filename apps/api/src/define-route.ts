@@ -10,6 +10,8 @@ export interface RouteCtx<In> {
   input: In;
   accountId: string;
   req: FastifyRequest;
+  /** 覆盖本次响应状态码(如幂等命中 201 路由返回 200) */
+  setStatus: (code: number) => void;
 }
 
 
@@ -45,8 +47,12 @@ export function defineRoute<InS extends z.ZodTypeAny, OutS extends z.ZodTypeAny>
       if (!parsed.success) {
         throw new ApiError('validation_failed', '入参校验失败', { issues: parsed.error.issues });
       }
-      const out = await opts.handler({ input: parsed.data, accountId, req });
-      reply.status(opts.status ?? 200);
+      let statusOverride: number | null = null;
+      const out = await opts.handler({
+        input: parsed.data, accountId, req,
+        setStatus: (code) => { statusOverride = code; },
+      });
+      reply.status(statusOverride ?? opts.status ?? 200);
       return opts.output.parse(out);
     },
   });
