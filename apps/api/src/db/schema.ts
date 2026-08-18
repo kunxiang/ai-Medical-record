@@ -18,6 +18,7 @@ export const account = pgTable('account', {
   passwordHash: text('password_hash').notNull(),
   displayName: text('display_name').notNull(),
   timezone: text('timezone').notNull().default('Asia/Shanghai'),
+  tokenEpoch: integer('token_epoch').notNull().default(0),   // D12:改密码递增 ⇒ 旧 token 失效
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -158,7 +159,7 @@ export const document = pgTable(
     check('doc_status', inList('status', DocumentStatus.options)),
     check('doc_type_enum', inList('doc_type', DocType.options)),
     uniqueIndex('uq_document_idempotency').on(t.uploadedBy, t.clientDocumentId),
-    index('idx_document_person_captured').on(t.personId, t.capturedAt.desc()),
+    index('idx_document_person_captured').on(t.personId, t.capturedAt.desc(), t.id.desc()),
   ],
 );
 

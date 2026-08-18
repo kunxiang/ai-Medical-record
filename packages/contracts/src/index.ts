@@ -1,3 +1,4 @@
+export * from './canonical.js';
 export * from './scalars.js';
 export * from './enums.js';
 export * from './person.js';

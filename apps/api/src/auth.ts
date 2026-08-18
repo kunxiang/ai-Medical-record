@@ -10,8 +10,9 @@ export const ARGON_OPTS = { memoryCost: 65536, timeCost: 3, parallelism: 4 } as 
 export const hashPassword = (pw: string) => argonHash(pw, ARGON_OPTS);
 export const verifyPassword = (hash: string, pw: string) => argonVerify(hash, pw);
 
-export async function signToken(accountId: string): Promise<string> {
-  return new SignJWT({})
+// D12(m1-02 §6):token_epoch 进 claims;改密码递增 ⇒ 旧 token 立即失效
+export async function signToken(accountId: string, tokenEpoch: number): Promise<string> {
+  return new SignJWT({ ep: tokenEpoch })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(accountId)
     .setIssuedAt()
@@ -19,7 +20,7 @@ export async function signToken(accountId: string): Promise<string> {
     .sign(secret);
 }
 
-export async function verifyToken(token: string): Promise<string> {
+export async function verifyToken(token: string): Promise<{ accountId: string; epoch: number }> {
   try {
     // 算法白名单锁死 HS256,leeway 60s(spec m0-05 §2)
     const { payload } = await jwtVerify(token, secret, {
@@ -27,7 +28,7 @@ export async function verifyToken(token: string): Promise<string> {
       clockTolerance: 60,
     });
     if (!payload.sub) throw new Error('no sub');
-    return payload.sub;
+    return { accountId: payload.sub, epoch: typeof payload['ep'] === 'number' ? payload['ep'] : -1 };
   } catch {
     throw new ApiError('unauthenticated', '认证失败');
   }

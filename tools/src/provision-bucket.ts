@@ -1,8 +1,9 @@
 // spec m0-04 §1:幂等建桶 + 自检。第二次运行无变更退出 0(99 A1)。
 import {
-  CreateBucketCommand, GetBucketEncryptionCommand, GetBucketLifecycleConfigurationCommand,
-  GetBucketVersioningCommand, GetObjectLockConfigurationCommand, GetPublicAccessBlockCommand,
-  HeadBucketCommand, PutBucketEncryptionCommand, PutBucketLifecycleConfigurationCommand,
+  CreateBucketCommand, GetBucketCorsCommand, GetBucketEncryptionCommand,
+  GetBucketLifecycleConfigurationCommand, GetBucketVersioningCommand,
+  GetObjectLockConfigurationCommand, GetPublicAccessBlockCommand, HeadBucketCommand,
+  PutBucketCorsCommand, PutBucketEncryptionCommand, PutBucketLifecycleConfigurationCommand,
   PutPublicAccessBlockCommand, S3ServiceException,
 } from '@aws-sdk/client-s3';
 import { adminClient, BUCKET } from './s3-admin.js';
@@ -24,6 +25,24 @@ const LIFECYCLE = {
       Filter: { Prefix: 'derived/' },
       Status: 'Enabled' as const,
       NoncurrentVersionExpiration: { NoncurrentDays: 30 },
+    },
+  ],
+};
+
+// CORS(m1-02 §7.2 / m0-CHANGES #8):带 x-amz-checksum-sha256 的跨源 PUT 必触发 preflight,
+// AllowedHeaders 漏一个就是整条直传链死。
+const WEB_ORIGINS = (process.env.WEB_ORIGIN ?? 'http://localhost:5173').split(',').map((o) => o.trim()).filter(Boolean);
+const CORS_RULES = {
+  CORSRules: [
+    {
+      AllowedOrigins: WEB_ORIGINS,
+      AllowedMethods: ['PUT', 'GET', 'HEAD'],
+      AllowedHeaders: [
+        'content-type', 'x-amz-checksum-sha256', 'x-amz-sdk-checksum-algorithm',
+        'x-amz-content-sha256', 'x-amz-date', 'authorization',
+      ],
+      ExposeHeaders: ['ETag'],
+      MaxAgeSeconds: 600,
     },
   ],
 };
@@ -64,6 +83,9 @@ async function main(): Promise<void> {
     new PutBucketLifecycleConfigurationCommand({ Bucket: BUCKET, LifecycleConfiguration: LIFECYCLE }),
   );
 
+  // CORS(M1)
+  await s3.send(new PutBucketCorsCommand({ Bucket: BUCKET, CORSConfiguration: CORS_RULES }));
+
   // ===== 自检(spec m0-04 §1 验证命令) =====
   const failures: string[] = [];
 
@@ -98,6 +120,26 @@ async function main(): Promise<void> {
     }
   } catch {
     console.warn('public-access-block 查询不支持(MinIO 默认私有,降级通过)');
+  }
+
+  // CORS 自检(m1-99 B 组:漏一个头就是整条直传链死)
+  try {
+    const cors = await s3.send(new GetBucketCorsCommand({ Bucket: BUCKET }));
+    const rule = cors.CORSRules?.[0];
+    const want = CORS_RULES.CORSRules[0]!;
+    const missing = want.AllowedHeaders.filter(
+      (h) => !(rule?.AllowedHeaders ?? []).some((x) => x.toLowerCase() === h || x === '*'),
+    );
+    if (missing.length) failures.push(`CORS AllowedHeaders 缺: ${missing.join(',')}`);
+    for (const m of want.AllowedMethods) {
+      if (!(rule?.AllowedMethods ?? []).includes(m)) failures.push(`CORS AllowedMethods 缺 ${m}`);
+    }
+    for (const o of want.AllowedOrigins) {
+      if (!(rule?.AllowedOrigins ?? []).some((x) => x === o || x === '*')) failures.push(`CORS AllowedOrigins 缺 ${o}`);
+    }
+    if (!(rule?.ExposeHeaders ?? []).some((h) => h.toLowerCase() === 'etag')) failures.push('CORS ExposeHeaders 缺 ETag');
+  } catch (e) {
+    failures.push(`CORS 未配置或读取失败: ${shortMsg(e)}`);
   }
 
   if (failures.length) {

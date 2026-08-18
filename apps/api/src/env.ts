@@ -21,6 +21,8 @@ export const env = {
     return s;
   })(),
   port: Number(process.env.PORT ?? 8300),
+  // CORS 白名单(m1-02 §7.1)。禁止 '*':带 Authorization 的跨源请求需要精确 origin。
+  webOrigins: (process.env.WEB_ORIGIN ?? 'http://localhost:5173').split(',').map((o) => o.trim()).filter(Boolean),
 };
 
 export const LOCK_RETENTION_YEARS = 10;

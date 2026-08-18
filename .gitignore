@@ -6,3 +6,6 @@ dist/
 coverage/
 .minio-data/
 .pg-data/
+fixtures/m1/*.jpg
+fixtures/m1/*.png
+fixtures/m1/*.pdf

@@ -128,6 +128,25 @@ export async function deleteObjectIfPossible(key: string): Promise<void> {
   }
 }
 
+/** L2 派生物:普通 PUT,**严禁上锁**(04 §1 权威矩阵)。 */
+export async function putDerivative(key: string, body: Buffer): Promise<void> {
+  await s3.send(new PutObjectCommand({ Bucket: B, Key: key, Body: body, ContentType: 'image/webp' }));
+}
+
+export async function getObjectBytes(key: string): Promise<Buffer | null> {
+  try {
+    const r = await s3.send(new GetObjectCommand({ Bucket: B, Key: key }));
+    return Buffer.from(await r.Body!.transformToByteArray());
+  } catch (e) {
+    if (isStatus(e, 404)) return null;
+    throw e;
+  }
+}
+
+export async function presignGetKey(key: string, expiresIn = 300): Promise<string> {
+  return getSignedUrl(s3, new GetObjectCommand({ Bucket: B, Key: key }), { expiresIn });
+}
+
 export async function presignPut(key: string, contentType: string, sha256Base64: string): Promise<{ url: string; headers: Record<string, string> }> {
   const cmd = new PutObjectCommand({
     Bucket: B, Key: key, ContentType: contentType, ChecksumSHA256: sha256Base64,

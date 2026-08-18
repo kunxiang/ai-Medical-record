@@ -16,7 +16,8 @@ const passwordHash = await hash(password, { memoryCost: 65536, timeCost: 3, para
 const rows = await sql`
   insert into account (id, email, password_hash, display_name, timezone)
   values (${uuidv7()}, ${email}, ${passwordHash}, ${displayName}, ${timezone})
-  on conflict (email) do update set password_hash = ${passwordHash}
+  on conflict (email) do update set password_hash = ${passwordHash},
+                                   token_epoch = account.token_epoch + 1
   returning id
 `;
 console.log(`seeded account ${email} -> ${rows[0]!['id']}`);

@@ -22,7 +22,9 @@ export type ParsedKey =
   | { kind: 'manifest'; year: string; month: string }
   | { kind: 'peopleMap' }
   | { kind: 'incoming'; batchId: string; uploadId: string }
-  | { kind: 'probe'; name: 'startup' | 'lock-probe' };
+  | { kind: 'probe'; name: 'startup' | 'lock-probe' }
+  | { kind: 'derivedMeta'; personSlug: string; docShortId: string }
+  | { kind: 'derivative'; personSlug: string; docShortId: string; variant: 'thumb' | 'preview'; pageNo: number };
 
 function docdirPrefix(personSlug: string, captureDate: string, docShortId: string): string {
   const year = captureDate.slice(0, 4);
@@ -57,9 +59,13 @@ export const buildKey = {
   incoming: (p: { batchId: string; uploadId: string }) => check(`_incoming/${p.batchId}/${p.uploadId}`),
   probe: (name: 'startup' | 'lock-probe', suffix?: string) =>
     check(`_probe/${name}${suffix ? '-' + suffix : ''}`),
-  // derived 构造器:M0 仅预留(spec m0-03 §5.5)
+  // derived 构造器(M1:派生物落地;m1-03 §1)
   derivedMeta: (p: { personSlug: string; docShortId: string }) =>
     check(`derived/${p.personSlug}/${p.docShortId}/meta.json`),
+  derivative: (p: { personSlug: string; docShortId: string; variant: 'thumb' | 'preview'; pageNo: number }) =>
+    check(`derived/${p.personSlug}/${p.docShortId}/${p.variant}-${pad2(p.pageNo)}.webp`),
+  derivedPrefix: (p: { personSlug: string; docShortId: string }) =>
+    check(`derived/${p.personSlug}/${p.docShortId}/`),
 };
 
 function check(key: string): string {
@@ -101,6 +107,17 @@ const MATCHERS: Array<[RegExp, (m: RegExpExecArray) => ParsedKey]> = [
   [
     new RegExp(`^_incoming/(${UUID})/(${UUID})$`),
     (m) => ({ kind: 'incoming', batchId: m[1]!, uploadId: m[2]! }),
+  ],
+  [
+    new RegExp(`^derived/(${PSLUG})/(${DSLUG})/meta\\.json$`),
+    (m) => ({ kind: 'derivedMeta', personSlug: m[1]!, docShortId: m[2]! }),
+  ],
+  [
+    new RegExp(`^derived/(${PSLUG})/(${DSLUG})/(thumb|preview)-(\\d{2})\\.webp$`),
+    (m) => ({
+      kind: 'derivative', personSlug: m[1]!, docShortId: m[2]!,
+      variant: m[3]! as 'thumb' | 'preview', pageNo: parseInt(m[4]!, 10),
+    }),
   ],
   [
     new RegExp(`^_probe/(startup|lock-probe)(?:-[a-z0-9]{1,16})?$`),

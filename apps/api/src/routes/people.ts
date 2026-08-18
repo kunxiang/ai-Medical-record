@@ -12,6 +12,8 @@ import { person, personAccess, personIdentifier } from '../db/schema.js';
 import { defineRoute } from '../define-route.js';
 import { ApiError, notFound } from '../errors.js';
 import { lockPerson, newId, personToApi, syncPersonToS3 } from '../person-service.js';
+import { appendAudit } from '../journal.js';
+import { serverTimestamp } from '@amr/storage';
 
 const PATCH_KEY_TO_COL = {
   display_name: 'displayName',
@@ -54,6 +56,11 @@ export function registerPeopleRoutes(app: FastifyInstance): void {
               note: input.note,
             });
             await tx.insert(personAccess).values({ accountId, personId: id, role: 'owner' });
+            // D11(m1-02 §5):权限授予进系统级审计
+            await appendAudit(tx, {
+              schema_version: '1.0', op: 'access_grant', account_id: accountId,
+              person_id: id, person_slug: slug, role: 'owner', at: serverTimestamp(),
+            });
             return syncPersonToS3(tx, id, accountId);
           });
           return personToApi(sidecar);
@@ -145,6 +152,23 @@ export function registerPeopleRoutes(app: FastifyInstance): void {
         await syncPersonToS3(tx, input.id, accountId);
       });
       return { archived: true as const };
+    },
+  });
+
+  defineRoute(app, {
+    method: 'GET',
+    url: '/api/v1/people/:id/identifiers',
+    input: z.object({ id: Uuid }),
+    output: z.object({ identifiers: z.array(PersonIdentifier) }),
+    handler: async ({ input, accountId }) => {
+      await requirePersonAccess(accountId, input.id, 'viewer');
+      const rows = await db.select().from(personIdentifier).where(eq(personIdentifier.personId, input.id));
+      return {
+        identifiers: rows.map((i) => ({
+          id: i.id, facility_id: i.facilityId, identifier_type: i.identifierType,
+          identifier_value: i.identifierValue, scope: i.scope,
+        })),
+      };
     },
   });
 

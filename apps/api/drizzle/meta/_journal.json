@@ -8,6 +8,13 @@
       "when": 1786976422914,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1787014246536,
+      "tag": "0001_m1_token_epoch_and_index",
+      "breakpoints": true
     }
   ]
 }

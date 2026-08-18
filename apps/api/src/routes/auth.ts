@@ -25,7 +25,7 @@ export function registerAuthRoutes(app: FastifyInstance): void {
         '$argon2id$v=19$m=65536,t=3,p=4$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
       const ok = await verifyPassword(hash, input.password).catch(() => false);
       if (!acct || !ok) throw new ApiError('unauthenticated', '认证失败');
-      return { access_token: await signToken(acct.id) };
+      return { access_token: await signToken(acct.id, acct.tokenEpoch) };
     },
   });
 }

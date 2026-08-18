@@ -1,0 +1,44 @@
+{
+  "photo-gps-o6": {
+    "file": "photo-gps-o6.jpg",
+    "sha256": "8b9721d745ee685be25426eadd61b3688ca51f7955fda9a949a88ae92b3ac170",
+    "bytes": 213240,
+    "mime": "image/jpeg"
+  },
+  "photo-plain": {
+    "file": "photo-plain.png",
+    "sha256": "932e1bf56d681ae81d7d34d72ccba65458447bea80051e32d7055b4469255cbf",
+    "bytes": 449816,
+    "mime": "image/png"
+  },
+  "page-1": {
+    "file": "page-1.jpg",
+    "sha256": "97fdb596cec0cfa450726041e8a964737c94f3fe59d3dd7c4bf8f37f2b7feb03",
+    "bytes": 189930,
+    "mime": "image/jpeg"
+  },
+  "page-2": {
+    "file": "page-2.jpg",
+    "sha256": "4e8f7ae2c69b24b472c6d2247f5f123f58a6d61686979d723e96c30d23f306d7",
+    "bytes": 187833,
+    "mime": "image/jpeg"
+  },
+  "page-3": {
+    "file": "page-3.jpg",
+    "sha256": "1399719622f40f49c6a0b590e0f6db5ca12a5006055fc476b43720e63616b887",
+    "bytes": 191884,
+    "mime": "image/jpeg"
+  },
+  "doc-1page": {
+    "file": "doc-1page.pdf",
+    "sha256": "b32229c094ad1a0bafe594a8898cfa510c4f448a7d663eb0abbb7749d098e817",
+    "bytes": 1276,
+    "mime": "application/pdf"
+  },
+  "huge": {
+    "file": "huge.jpg",
+    "sha256": "4ddad06224d2379cd969ec00f61ef3e838e006c13e3182052b28bc8b5a0e792a",
+    "bytes": 61730942,
+    "mime": "image/jpeg"
+  }
+}

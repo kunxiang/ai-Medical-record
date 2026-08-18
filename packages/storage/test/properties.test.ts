@@ -112,3 +112,23 @@ describe('capture_date 折算(spec m0-03 §3)', () => {
     expect(captureDateInZone('2026-08-17T02:32:11+08:00', 'America/New_York')).toBe('2026-08-16');
   });
 });
+
+describe('derived key(M1 · m1-03 §1;m0/CHANGES #7)', () => {
+  it('thumb/preview/meta 往返', () => {
+    for (let i = 0; i < 300; i++) {
+      const personSlug = 'p' + randomSlugTail();
+      const docShortId = 'd' + randomSlugTail();
+      const pageNo = 1 + rand(99);
+      for (const variant of ['thumb', 'preview'] as const) {
+        const k = buildKey.derivative({ personSlug, docShortId, variant, pageNo });
+        expect(parseKey(k)).toEqual({ kind: 'derivative', personSlug, docShortId, variant, pageNo });
+      }
+      const m = buildKey.derivedMeta({ personSlug, docShortId });
+      expect(parseKey(m)).toEqual({ kind: 'derivedMeta', personSlug, docShortId });
+    }
+  });
+  it('非法 derived key 抛错', () => {
+    expect(() => parseKey('derived/p3f7a2/d7k2m9/thumb-1.webp')).toThrow();
+    expect(() => parseKey('derived/p3f7a2/d7k2m9/thumb-01.jpg')).toThrow();
+  });
+});

@@ -1,5 +1,9 @@
 import Fastify, { type FastifyInstance } from 'fastify';
+import cors from '@fastify/cors';
 import { ApiError } from './errors.js';
+import { env } from './env.js';
+import { initSharp } from './derivatives.js';
+import { registerBrowseRoutes } from './routes/browse.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerPeopleRoutes } from './routes/people.js';
 import { registerDocumentRoutes } from './routes/documents.js';
@@ -7,6 +11,18 @@ import { armCrashPoint, InjectedCrash } from './test-hooks.js';
 
 export function buildServer(): FastifyInstance {
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'warn' } });
+
+  initSharp();   // 进程级全局,启动时设一次(m1-03 §2)
+
+  // CORS(m1-02 §7.1):白名单来自 env,禁止 *,不用 cookie
+  void app.register(cors, {
+    origin: env.webOrigins,
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['content-type', 'authorization'],
+    exposedHeaders: ['X-Amr-Generated'],
+    credentials: false,
+    maxAge: 600,
+  });
 
   // A8 崩溃注入:仅 M0_TEST_HOOKS=1 时启用(spec m0-99 A8)
   if (process.env.M0_TEST_HOOKS === '1') {
@@ -37,5 +53,6 @@ export function buildServer(): FastifyInstance {
   registerAuthRoutes(app);
   registerPeopleRoutes(app);
   registerDocumentRoutes(app);
+  registerBrowseRoutes(app);
   return app;
 }
