@@ -1,6 +1,6 @@
 // spec m0-99 B1/B7/B8:依赖规则、defineRoute 强制、_meta schema 覆盖 —— CI 断言。
 import { execSync } from 'node:child_process';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -27,6 +27,16 @@ if (pkgViolations.length) failures.push(`packages 依赖 apps:\n${pkgViolations.
 const contractsPkg = JSON.parse(readFileSync(path.join(root, 'packages/contracts/package.json'), 'utf-8'));
 const deps = Object.keys(contractsPkg.dependencies ?? {});
 if (deps.some((d) => d !== 'zod')) failures.push(`contracts 运行时依赖越界: ${deps.join(',')}`);
+
+// B1c: apps/web 只依赖 @amr/contracts(m1-05 §1)
+const webPkgPath = path.join(root, 'apps/web/package.json');
+if (existsSync(webPkgPath)) {
+  const webDeps = Object.keys((JSON.parse(readFileSync(webPkgPath, 'utf-8')).dependencies ?? {}) as Record<string, string>);
+  const forbidden = webDeps.filter((d) => d.startsWith('@amr/') && d !== '@amr/contracts');
+  if (forbidden.length) failures.push(`apps/web 依赖越界: ${forbidden.join(',')}`);
+  const webImports = grep("from '@amr/(api|storage)", path.join(root, 'apps/web/src'));
+  if (webImports.length) failures.push(`apps/web 直接 import 服务端包:\n${webImports.join('\n')}`);
+}
 
 // B7: 全部路由经 defineRoute —— 禁止裸注册
 const bare = grep('app\\.(get|post|patch|delete|put)\\(', path.join(root, 'apps/api/src'));
@@ -58,8 +68,18 @@ for (const m of versionsBlock.matchAll(/(\w+): '([\d.]+)'/g)) {
   }
 }
 
+// B12: spec 中出现的每个 D\d+ 在 design-debt 有对应行(防悬空引用复发)
+const debts = new Set(
+  [...readFileSync(path.join(root, 'docs/design-debt.md'), 'utf-8').matchAll(/^\| (D\d+) \|/gm)].map((m) => m[1]!),
+);
+for (const line of grep('\\bD[0-9]+\\b', path.join(root, 'specs'))) {
+  for (const m of line.matchAll(/\bD(\d+)\b/g)) {
+    if (!debts.has(`D${m[1]}`)) failures.push(`悬空设计债引用 D${m[1]}: ${line.slice(0, 100)}`);
+  }
+}
+
 if (failures.length) {
   console.error('ci:deps 失败:\n' + failures.map((f) => '— ' + f).join('\n'));
   process.exit(1);
 }
-console.log('ci:deps 通过(B1/B2/B7/B8)');
+console.log('ci:deps 通过(B1/B2/B7/B8/B12)');

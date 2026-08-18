@@ -14,7 +14,8 @@
     "m0:acceptance": "tsx src/m0-acceptance.ts",
     "ci:deps": "tsx src/ci-deps.ts",
     "gen-m1-fixtures": "tsx src/gen-m1-fixtures.ts",
-    "regen-derivatives": "tsx src/regen-derivatives.ts"
+    "regen-derivatives": "tsx src/regen-derivatives.ts",
+    "m1:acceptance": "tsx src/m1-acceptance.ts"
   },
   "dependencies": {
     "@amr/contracts": "workspace:*",
@@ -30,6 +31,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
+    "playwright": "^1.62.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   }
