@@ -33,6 +33,20 @@ const bare = grep('app\\.(get|post|patch|delete|put)\\(', path.join(root, 'apps/
 const bareFiltered = bare.filter((l) => !l.includes('define-route.ts'));
 if (bareFiltered.length) failures.push(`裸路由注册:\n${bareFiltered.join('\n')}`);
 
+// B2: 迁移 SQL 的 CHECK 值列表 == contracts 枚举(单一来源断言)
+const migrationSql = readFileSync(path.join(root, 'apps/api/drizzle/0000_init.sql'), 'utf-8');
+const enumsTs = readFileSync(path.join(root, 'packages/contracts/src/enums.ts'), 'utf-8');
+const expectChecks: Array<[string, string[]]> = [];
+for (const m of enumsTs.matchAll(/export const (\w+) = z\.enum\(\[([\s\S]*?)\]\)/g)) {
+  const values = [...m[2]!.matchAll(/'([^']+)'/g)].map((x) => x[1]!);
+  expectChecks.push([m[1]!, values]);
+}
+for (const [name, values] of expectChecks) {
+  if (name === 'MimeType') continue; // MimeType 不进 DB CHECK
+  const inList = values.map((v) => `'${v}'`).join(', ');
+  if (!migrationSql.includes(inList)) failures.push(`B2: 迁移 CHECK 与 contracts.${name} 不一致(期望 in (${inList}))`);
+}
+
 // B8: 代码中的每个 schema_version 在 gen-meta 的 schemas 清单中有对应文件(D10)
 const genMeta = readFileSync(path.join(root, 'tools/src/gen-meta.ts'), 'utf-8');
 const contractsIndex = readFileSync(path.join(root, 'packages/contracts/src/index.ts'), 'utf-8');
@@ -48,4 +62,4 @@ if (failures.length) {
   console.error('ci:deps 失败:\n' + failures.map((f) => '— ' + f).join('\n'));
   process.exit(1);
 }
-console.log('ci:deps 通过(B1/B7/B8)');
+console.log('ci:deps 通过(B1/B2/B7/B8)');
