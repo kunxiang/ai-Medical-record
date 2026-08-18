@@ -32,7 +32,7 @@ export async function appendManifest(tx: Tx, line: Record<string, unknown>): Pro
 export async function appendAudit(tx: Tx, line: Record<string, unknown>): Promise<void> {
   const full = AuditLine.parse({ ...line, event_id: uuidv7() });
   const { year, month } = utcYearMonth(full.at);
-  const key = `_index/audit/${year}-${month}.jsonl`;
+  const key = buildKey.audit({ year, month });
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
   await appendJsonl(key, canonicalJsonl(full));
 }

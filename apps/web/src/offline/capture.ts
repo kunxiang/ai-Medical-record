@@ -73,15 +73,16 @@ export async function preparePage(file: File): Promise<PreparedPage> {
   if (mime !== 'application/pdf') {
     try {
       // 纯解析,不改动源字节
-      const parsed = await exifr.parse(blob, { pick: ['DateTimeOriginal', 'Orientation'] });
-      if (parsed) {
-        const dto = parsed['DateTimeOriginal'] as Date | undefined;
-        const ori = parsed['Orientation'] as number | undefined;
-        exif = {
-          captured_at: dto instanceof Date && !Number.isNaN(dto.getTime()) ? dto.toISOString() : null,
-          orientation: typeof ori === 'number' ? ori : null,
-        };
-      }
+      // orientation 必须走专用入口:pick 模式下 IFD0 的 Orientation 取不到
+      const [parsed, ori] = await Promise.all([
+        exifr.parse(blob, { pick: ['DateTimeOriginal'] }) as Promise<Record<string, unknown> | undefined>,
+        exifr.orientation(blob).catch(() => undefined) as Promise<number | undefined>,
+      ]);
+      const dto = parsed?.['DateTimeOriginal'] as Date | undefined;
+      exif = {
+        captured_at: dto instanceof Date && !Number.isNaN(dto.getTime()) ? dto.toISOString() : null,
+        orientation: typeof ori === 'number' ? ori : null,
+      };
     } catch {
       exif = null;   // EXIF 解析失败不阻断采集
     }

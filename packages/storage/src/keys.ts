@@ -20,6 +20,7 @@ export type ParsedKey =
   | { kind: 'person'; personSlug: string }
   | { kind: 'journal'; personSlug: string; year: string; month: string }
   | { kind: 'manifest'; year: string; month: string }
+  | { kind: 'audit'; year: string; month: string }
   | { kind: 'peopleMap' }
   | { kind: 'incoming'; batchId: string; uploadId: string }
   | { kind: 'probe'; name: 'startup' | 'lock-probe' }
@@ -55,6 +56,7 @@ export const buildKey = {
   journal: (p: { personSlug: string; year: string; month: string }) =>
     check(`people/${p.personSlug}/journal/${p.year}-${p.month}.jsonl`),
   manifest: (p: { year: string; month: string }) => check(`_index/manifests/${p.year}-${p.month}.jsonl`),
+  audit: (p: { year: string; month: string }) => check(`_index/audit/${p.year}-${p.month}.jsonl`),
   peopleMap: () => `_index/people.json`,
   incoming: (p: { batchId: string; uploadId: string }) => check(`_incoming/${p.batchId}/${p.uploadId}`),
   probe: (name: 'startup' | 'lock-probe', suffix?: string) =>
@@ -102,6 +104,10 @@ const MATCHERS: Array<[RegExp, (m: RegExpExecArray) => ParsedKey]> = [
   [
     new RegExp(`^_index/manifests/(\\d{4})-(\\d{2})\\.jsonl$`),
     (m) => ({ kind: 'manifest', year: m[1]!, month: m[2]! }),
+  ],
+  [
+    new RegExp(`^_index/audit/(\\d{4})-(\\d{2})\\.jsonl$`),
+    (m) => ({ kind: 'audit', year: m[1]!, month: m[2]! }),
   ],
   [new RegExp(`^_index/people\\.json$`), () => ({ kind: 'peopleMap' })],
   [

@@ -285,7 +285,8 @@ console.log('A12 浏览');
 await page.getByTestId('tab-browse').click();
 await page.getByTestId('browse').waitFor();
 const thumbReqs: string[] = [];
-page.on('request', (r) => { if (r.url().includes('/thumb')) thumbReqs.push(r.url()); });
+// 只数 API 的 thumb 请求 —— 302 目标是 derived/…/thumb-01.webp,URL 里同样含 "thumb"
+page.on('request', (r) => { if (/\/api\/v1\/documents\/[^/]+\/pages\/\d+\/thumb/.test(r.url())) thumbReqs.push(r.url()); });
 await sleep(2500);
 const cards = await page.locator('[data-testid^="doc-"]').count();
 check('A12 时间轴渲染文档卡片', cards > 0, `cards=${cards}`);
@@ -318,7 +319,7 @@ const l1Before = await l1Snapshot();
 
 // ── A18 L2 可丢 ──
 console.log('A18 L2 可丢');
-execSync('pnpm --silent run regen-derivatives -- --purge', { cwd: path.join(ROOT, 'tools'), stdio: 'pipe' });
+execSync('npx tsx src/regen-derivatives.ts --purge', { cwd: path.join(ROOT, 'tools'), stdio: 'pipe' });
 check('A18 derived 已清空', (await listAll('derived/')).length === 0);
 const relazy = await fetch(`${API}/api/v1/documents/${anyDoc.id}/pages/1/thumb?access_token=${token}`, { redirect: 'manual' });
 check('A18 惰性路径重新生成', relazy.status === 302 && relazy.headers.get('x-amr-generated') === '1');
