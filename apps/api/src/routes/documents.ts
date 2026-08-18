@@ -4,7 +4,7 @@ import { z } from 'zod';
 import {
   CaptureSidecar, DocumentCreate, DocumentOut, MAX_UPLOAD_BYTES, MIME_TO_EXT,
   PageSidecar, PageUrlResponse, PresignRequest, PresignResponse, Uuid,
-  capturedAtInRange,
+  capturedAtInRange, idempotencyFingerprint,
 } from '@amr/contracts';
 
 type Mime = keyof typeof MIME_TO_EXT;
@@ -95,8 +95,10 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
         });
       }
 
-      // 1. 幂等检查(canonical 比对,审核 #001 B4)
-      const payloadBytes = canonicalJson(DocumentCreate.parse(input)).toString('utf-8');
+      // 1. 幂等检查(稳定语义指纹,m0/CHANGES #4 · 审核 #002 A-1)
+      // ★ 必须用 idempotencyFingerprint 而非整包 canonical payload:重试要重新 presign,
+      //   batch_id/upload_id 必变 —— 拿整包比对等于"每次重试都 409 终止"。
+      const fingerprint = idempotencyFingerprint(DocumentCreate.parse(input));
       const existing = await db
         .select()
         .from(document)
@@ -104,8 +106,8 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
         .limit(1);
       if (existing[0]) {
         const prior = await loadDocumentOut(existing[0].id);
-        const priorPayload = existing[0].columnSet as { m0_payload?: string } | null;
-        if (priorPayload?.m0_payload === payloadBytes) {
+        const priorPayload = existing[0].columnSet as { idem_fingerprint?: string } | null;
+        if (priorPayload?.idem_fingerprint === fingerprint) {
           setStatus(200); // 幂等命中(spec m0-06 §3)
           return prior;
         }
@@ -252,8 +254,9 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
           capturedAt: new Date(input.captured_at), captureDate,
           uploadedBy: accountId, status: 'ready',
           clientDocumentId: input.client_document_id,
-          // M0 内部:幂等 payload 快照暂存于 columnSet(该列 M0 无业务用途,提取层 M4 接管前腾退)
-          columnSet: { m0_payload: payloadBytes },
+          // 幂等指纹暂存于 columnSet(该列提取层 M4 接管前无业务用途)。
+          // 指纹的每个输入都在 capture.json 里 ⇒ 删库重建可原样重算(rebuild-index)。
+          columnSet: { idem_fingerprint: fingerprint },
         });
         await tx.insert(documentPage).values(
           staged.map((s) => ({

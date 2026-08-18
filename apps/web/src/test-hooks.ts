@@ -1,9 +1,10 @@
 // spec m1-99 §0.1:测试注入面。仅 VITE_M1_TEST_HOOKS=1 构建暴露;
 // 生产构建里本模块的调用点被 tree-shake(CI 断言产物不含 __amr)。
-import { allCaptures, db } from './offline/db.js';
-import { appendDraftPage, finalizeDraft, preparePage } from './offline/capture.js';
+import { allCaptures, db, getCapture } from './offline/db.js';
+import { appendDraftPage, finalizeDraft, preparePage, reassignQueued } from './offline/capture.js';
 import { tick } from './offline/queue.js';
 import { setPause, type PauseSpec } from './offline/pause.js';
+import { auth } from './api/client.js';
 
 export function installTestHooks(deps: {
   currentPerson: () => { id: string; slug: string; display_name: string } | null;
@@ -69,6 +70,44 @@ export function installTestHooks(deps: {
     },
     pauseAt(stage: PauseSpec['stage'], nth: number) {
       setPause({ stage, nth });
+    },
+    /** A7b:把队列项改挂到一个服务端已存在的 client_document_id 上,
+     *  使登记步骤真实撞上 409 —— 走的是产品自己的错误分类路径,不是伪造状态。 */
+    async retagClientDocumentId(oldId: string, newId: string) {
+      const d = await db();
+      const rec = await getCapture(oldId);
+      if (!rec) throw new Error(`队列项不存在: ${oldId}`);
+      const tx = d.transaction(['captures', 'blobs'], 'readwrite');
+      const blobs = tx.objectStore('blobs');
+      for (let p = 1; p <= rec.page_count; p++) {
+        const b = await blobs.get([oldId, p]);
+        if (b) {
+          await blobs.delete([oldId, p]);
+          await blobs.put({ ...b, client_document_id: newId });
+        }
+      }
+      await tx.objectStore('captures').delete(oldId);
+      await tx.objectStore('captures').put({ ...rec, client_document_id: newId });
+      await tx.done;
+      deps.notifyChanged();
+      return newId;
+    },
+    /** A11:直接调用产品的改归属函数,拿到它真实抛出的拒绝理由 */
+    async reassign(id: string, person: { id: string; slug: string; display_name: string }) {
+      try {
+        await reassignQueued(id, person);
+        deps.notifyChanged();
+        return { ok: true as const };
+      } catch (e) {
+        return { ok: false as const, message: e instanceof Error ? e.message : String(e) };
+      }
+    },
+    /** A16:把 token 换成过期/伪造值,让队列真实撞上 401 */
+    corruptToken() {
+      auth.set('eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJib2d1cyJ9.bm90LWEtcmVhbC1zaWduYXR1cmU');
+    },
+    hasToken() {
+      return auth.get() !== null;
     },
     resume() {
       setPause(null);

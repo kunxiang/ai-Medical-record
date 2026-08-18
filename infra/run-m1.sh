@@ -65,6 +65,7 @@ echo "== A 组验收(Playwright)=="
 ( cd "$ROOT/tools" && npx tsx src/m1-acceptance.ts )
 
 echo "== B 组 CI 断言 =="
-pnpm --filter @amr/tools --silent run ci:deps
-pnpm --filter @amr/storage --silent run test
+pnpm --filter @amr/tools --silent run ci:deps          # m1-99 B1/B5/B6/B7/B8/B12
+pnpm --filter @amr/storage --silent run test           # m1-99 B2
+pnpm --filter @amr/contracts --silent run test         # m1-99 B11
 echo "== M1 验收完成 =="

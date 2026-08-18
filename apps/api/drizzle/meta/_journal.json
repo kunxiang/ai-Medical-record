@@ -15,6 +15,13 @@
       "when": 1787014246536,
       "tag": "0001_m1_token_epoch_and_index",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787020407585,
+      "tag": "0002_m1_capture_discard_event",
+      "breakpoints": true
     }
   ]
 }

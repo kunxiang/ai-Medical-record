@@ -1,6 +1,9 @@
-// spec m0-99 B1/B7/B8:依赖规则、defineRoute 强制、_meta schema 覆盖 —— CI 断言。
+// CI 断言集合。两套 spec 的 B 编号不同,每条都标注出处以免再次错位:
+//   m0-99 B1/B2/B7/B8  ·  m1-99 B1/B5/B6/B7/B8/B12
+// 不在这里的:m1-99 B2(storage 性质测试)、B3/B4/B9/B10(验收脚本内)、B11(contracts 单测)。
 import { execSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -78,8 +81,90 @@ for (const line of grep('\\bD[0-9]+\\b', path.join(root, 'specs'))) {
   }
 }
 
+// m1-99 B5: journal 事件三处同步。registries 与 README 都由 gen-meta 从 JOURNAL_EVENT_REGISTRY
+// 生成(结构上不会漏),真正会漏的是"往 JournalEvent 联合体里加了新事件却没进注册表"。
+const journalTs = readFileSync(path.join(root, 'packages/contracts/src/journal.ts'), 'utf-8');
+const registry = new Set(
+  [...(/JOURNAL_EVENT_REGISTRY = \[([\s\S]*?)\]/.exec(journalTs)?.[1] ?? '').matchAll(/'([^']+)'/g)].map((m) => m[1]!),
+);
+for (const m of journalTs.matchAll(/event: z\.literal\('([^']+)'\)/g)) {
+  if (!registry.has(m[1]!)) failures.push(`B5: journal 事件 ${m[1]} 不在 JOURNAL_EVENT_REGISTRY(_meta 与 README 会漏)`);
+}
+const genMetaSrc = readFileSync(path.join(root, 'tools/src/gen-meta.ts'), 'utf-8');
+if (!genMetaSrc.includes('JOURNAL_EVENT_REGISTRY')) {
+  failures.push('B5: gen-meta 未从 JOURNAL_EVENT_REGISTRY 生成 registries/README');
+}
+
+// m1-99 B8: UI 文案不得承诺后台上传(队列是前台驱动的,ADR-046)
+const webSrc = path.join(root, 'apps/web/src');
+if (existsSync(webSrc)) {
+  const promises = execSync(
+    `grep -rn --include='*.tsx' --include='*.ts' -E '后台(自动)?上传|关掉也.*传|关闭.*继续上传|自动在后台' ${JSON.stringify(webSrc)} || true`,
+    { encoding: 'utf-8' },
+  ).trim().split('\n').filter(Boolean)
+    // 注释里说明"不承诺后台上传"是允许的,只禁面向用户的字符串
+    .filter((l) => !/^\S+:\d+:\s*(\/\/|\*|\/\*)/.test(l) && !l.includes('未承诺'));
+  if (promises.length) failures.push(`B8: UI 文案承诺了后台上传:\n${promises.join('\n')}`);
+}
+
+// m1-99 B6: SW 配置 + 生产产物不含测试注入面
+const viteConfigPath = path.join(root, 'apps/web/vite.config.ts');
+if (existsSync(viteConfigPath)) {
+  const vc = readFileSync(viteConfigPath, 'utf-8');
+  if (!/navigateFallbackDenylist:\s*\[\s*\/\^\\\/api\\\//.test(vc)) {
+    failures.push('B6: SW 缺 navigateFallbackDenylist: [/^\\/api\\//](导航回退会吞掉 API 404)');
+  }
+  if (!/runtimeCaching:\s*\[\s*\]/.test(vc)) failures.push('B6: SW runtimeCaching 必须为空(医疗内容禁止进 SW 缓存)');
+
+  const outDir = mkdtempSync(path.join(tmpdir(), 'amr-prodbuild-'));
+  try {
+    execSync(`npx vite build --outDir ${JSON.stringify(outDir)} --emptyOutDir`, {
+      cwd: path.join(root, 'apps/web'), stdio: 'pipe',
+      env: { ...process.env, VITE_M1_TEST_HOOKS: '' },
+    });
+    // 只看会被执行的产物。.map 里出现 __amr 属正常(sourcesContent 保留原文),
+    // 它不构成注入面 —— 真正要断言的是没有任何一行会跑的代码去挂 window.__amr。
+    const leaked = execSync(
+      `grep -rl --include='*.js' --include='*.html' --include='*.css' '__amr' ${JSON.stringify(outDir)} || true`,
+      { encoding: 'utf-8' },
+    ).trim().split('\n').filter(Boolean);
+    if (leaked.length) failures.push(`B6: 生产产物含测试注入面 __amr:\n${leaked.join('\n')}`);
+    const hookLeak = execSync(
+      `grep -rl --include='*.js' 'installTestHooks' ${JSON.stringify(outDir)} || true`,
+      { encoding: 'utf-8' },
+    ).trim().split('\n').filter(Boolean);
+    if (hookLeak.length) failures.push(`B6: 生产产物含 installTestHooks:\n${hookLeak.join('\n')}`);
+  } catch (e) {
+    failures.push(`B6: 生产构建失败: ${e instanceof Error ? e.message.slice(0, 300) : String(e)}`);
+  } finally {
+    rmSync(outDir, { recursive: true, force: true });
+  }
+}
+
+// m1-99 B7: schema.ts 与迁移无漂移(drizzle-kit generate 不应产出新文件)
+const drizzleDir = path.join(root, 'apps/api/drizzle');
+if (existsSync(drizzleDir)) {
+  const backup = mkdtempSync(path.join(tmpdir(), 'amr-drizzle-'));
+  cpSync(drizzleDir, backup, { recursive: true });
+  const before = readdirSync(drizzleDir).sort().join(',');
+  try {
+    execSync('npx drizzle-kit generate --name=ci_drift_probe', {
+      cwd: path.join(root, 'apps/api'), stdio: 'pipe',
+    });
+  } catch (e) {
+    failures.push(`B7: drizzle-kit generate 执行失败: ${e instanceof Error ? e.message.slice(0, 200) : String(e)}`);
+  }
+  const after = readdirSync(drizzleDir).sort().join(',');
+  if (before !== after) {
+    failures.push(`B7: schema.ts 与迁移漂移 —— generate 产出了新迁移(${after.replace(before, '').replace(/^,/, '')})`);
+    rmSync(drizzleDir, { recursive: true, force: true });
+    cpSync(backup, drizzleDir, { recursive: true });   // 复原,不把探针文件留在仓库里
+  }
+  rmSync(backup, { recursive: true, force: true });
+}
+
 if (failures.length) {
   console.error('ci:deps 失败:\n' + failures.map((f) => '— ' + f).join('\n'));
   process.exit(1);
 }
-console.log('ci:deps 通过(B1/B2/B7/B8/B12)');
+console.log('ci:deps 通过(m0-99 B1/B2/B7/B8 · m1-99 B1/B5/B6/B7/B8/B12)');

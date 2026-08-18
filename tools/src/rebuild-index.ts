@@ -4,7 +4,7 @@
 import { GetObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import postgres from 'postgres';
 import { uuidv7 } from 'uuidv7';
-import { CaptureSidecar, ManifestLine, PersonSidecar } from '@amr/contracts';
+import { CaptureSidecar, ManifestLine, PersonSidecar, idempotencyFingerprint } from '@amr/contracts';
 import { adminClient, BUCKET } from './s3-admin.js';
 
 const s3 = adminClient();
@@ -120,12 +120,30 @@ for (const [shortId, st] of docState) {
     `;
     accountIds.add(cap.uploaded_by);
   }
+  // 幂等指纹从 capture.json 原样重算 —— 它的每个输入都是 L1 事实。
+  // 不重算的话:重建后客户端重放同一 client_document_id 会撞 409 终止(而非 200 命中)。
+  const fingerprint = idempotencyFingerprint({
+    person_id: personId,
+    person_confirmed: true,
+    confirmed_by: cap.person.confirmed_by,
+    batch_id: '00000000-0000-7000-8000-000000000000',   // 不进指纹,占位
+    source: cap.source,
+    captured_at: cap.captured_at,
+    client_document_id: cap.client_document_id,
+    pages: cap.pages.map((pg) => ({
+      upload_id: '00000000-0000-7000-8000-000000000000', // 不进指纹,占位
+      page_no: pg.page_no, capture_order: pg.capture_order,
+      width: pg.width, height: pg.height, sha256: pg.sha256, exif: null,
+    })),
+  });
   await sql`
     insert into document (id, short_id, person_id, doc_type, page_count, source, original_filename,
-                          captured_at, capture_date, uploaded_by, status, client_document_id, created_at)
+                          captured_at, capture_date, uploaded_by, status, client_document_id, created_at,
+                          column_set)
     values (${cap.document_id}, ${shortId}, ${personId}, 'unknown', ${cap.pages.length}, ${cap.source},
             ${cap.original_filename}, ${cap.captured_at}, ${cap.capture_date}, ${cap.uploaded_by}, 'ready',
-            ${cap.client_document_id}, ${cap.created_at})
+            ${cap.client_document_id}, ${cap.created_at},
+            ${sql.json({ idem_fingerprint: fingerprint })})
     on conflict (id) do nothing
   `;
   for (const pg of cap.pages) {

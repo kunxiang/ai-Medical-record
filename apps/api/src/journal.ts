@@ -12,7 +12,13 @@ export async function appendJournal(
   personSlug: string,
   event: Record<string, unknown> & { at?: string },
 ): Promise<void> {
-  const full = JournalEvent.parse({ ...event, event_id: uuidv7(), at: event.at ?? serverTimestamp() });
+  // event_id:调用方给了就用调用方的(客户端持久化的 discard_event_id 是重放幂等的唯一凭据),
+  // 只有服务端自发事件才现生成 —— 覆盖它等于把幂等键扔掉(m1-99 A8)。
+  const full = JournalEvent.parse({
+    ...event,
+    event_id: typeof event['event_id'] === 'string' ? event['event_id'] : uuidv7(),
+    at: event.at ?? serverTimestamp(),
+  });
   const { year, month } = utcYearMonth(full.at);
   const key = buildKey.journal({ personSlug, year, month });
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`);

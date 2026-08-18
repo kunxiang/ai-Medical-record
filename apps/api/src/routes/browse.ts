@@ -8,7 +8,7 @@ import {
 import { serverTimestamp } from '@amr/storage';
 import { requireDocumentAccess, requirePersonAccess } from '../access.js';
 import { db } from '../db/client.js';
-import { document, documentPage, person } from '../db/schema.js';
+import { captureDiscardEvent, document, documentPage, person } from '../db/schema.js';
 import { defineRoute } from '../define-route.js';
 import { ApiError, notFound } from '../errors.js';
 import { ensureDerivative, type Variant } from '../derivatives.js';
@@ -133,6 +133,18 @@ export function registerBrowseRoutes(app: FastifyInstance): void {
       if (!p) throw notFound();
       await db.transaction(async (tx) => {
         await lockPerson(tx, input.person_id);
+        // 幂等台账:同一 discard_event_id 重放只写一行 journal(m1-99 A8)。
+        // 台账与 journal 同事务 ⇒ 要么都成,要么都不成。
+        const claimed = await tx
+          .insert(captureDiscardEvent)
+          .values({
+            id: input.discard_event_id,
+            personId: input.person_id,
+            clientDocumentId: input.client_document_id,
+          })
+          .onConflictDoNothing({ target: captureDiscardEvent.id })
+          .returning({ id: captureDiscardEvent.id });
+        if (claimed.length === 0) return;   // 已记录过,直接返回 recorded:true
         await appendJournal(tx, p.slug, {
           schema_version: '1.0',
           event: 'capture_discard',

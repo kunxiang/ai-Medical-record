@@ -205,3 +205,13 @@ export const uploadFile = pgTable('upload_file', {
   incomingKey: text('incoming_key').notNull().unique(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** 放弃上报的幂等台账(m1-99 A8):discard_event_id 由客户端持久化,重放只应产生一行 journal。
+ *  这是 L2 结构 —— 删库重建后台账为空,重放窗口内可能补出第二行;
+ *  journal 回放(D16,M3)落地后该台账可由 L1 自身重建,届时本表退化为缓存(D17)。 */
+export const captureDiscardEvent = pgTable('capture_discard_event', {
+  id: uuid('id').primaryKey(),                       // == discard_event_id
+  personId: uuid('person_id').notNull().references(() => person.id),
+  clientDocumentId: uuid('client_document_id').notNull(),
+  recordedAt: timestamp('recorded_at', { withTimezone: true }).notNull().defaultNow(),
+});

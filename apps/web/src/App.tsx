@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, auth } from './api/client.js';
 import { allCaptures, db, kvGet, kvSet, recoverAfterRestart, type CaptureRecord, type PersonCacheRecord } from './offline/db.js';
-import { configureQueue, startQueueDriver, tick } from './offline/queue.js';
+import { configureQueue, resumeQueue, startQueueDriver } from './offline/queue.js';
 import { lastPersistStatus, requestPersistence } from './offline/persist.js';
 import { LoginView } from './features/capture/LoginView.js';
 import { CaptureView } from './features/capture/CaptureView.js';
@@ -94,7 +94,9 @@ export function App(): JSX.Element {
           auth.set(t);
           setToken(t);
           setNotice(null);
-          void tick('after-login');
+          // 必须 resumeQueue 而非 tick:401 时队列被 pauseQueue() 置停,
+          // 只 tick 会被 paused 拦掉 —— 重新登录后队列将永不恢复(m1-99 A16)
+          resumeQueue();
         }}
       />
     );

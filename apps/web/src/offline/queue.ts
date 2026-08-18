@@ -117,7 +117,7 @@ async function processOne(rec: CaptureRecord): Promise<void> {
   // ① presign(在上传时取 —— 预签名 15 分钟、批次 24 小时过期,m1-04 §2.2)
   let batch: NonNullable<CaptureRecord['batch']>;
   try {
-    checkPause('presign');
+    await checkPause('presign');
     const res = await api.presign({
       person_id: rec.person_id,
       files: blobs.map((b) => ({
@@ -141,7 +141,7 @@ async function processOne(rec: CaptureRecord): Promise<void> {
   // ② 直传(整文件单 PUT;分片续传见 D14)
   try {
     for (const up of batch.uploads) {
-      checkPause('put');
+      await checkPause('put');
       const b = blobs.find((x) => x.page_no === up.page_no)!;
       const res = await fetch(up.url, { method: 'PUT', headers: up.headers, body: b.blob });
       if (!res.ok) throw new S3PutFailure(res.status, `S3 PUT ${res.status}`);
@@ -154,7 +154,7 @@ async function processOne(rec: CaptureRecord): Promise<void> {
   // ③ 登记
   await putCapture({ ...rec, state: 'registering', batch });
   try {
-    checkPause('register');
+    await checkPause('register');
     await api.createDocument({
       person_id: rec.person_id,
       person_confirmed: true,

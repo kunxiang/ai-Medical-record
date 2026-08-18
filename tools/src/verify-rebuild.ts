@@ -21,9 +21,11 @@ async function snapshot() {
     select id, short_id, person_id, capture_date::text, captured_at, source,
            original_filename, status, client_document_id
     from document order by short_id`;
+  // thumb_key 不在字段表(m1-99 A19):它是 L2 派生物的位置,M1 根本不写它,
+  // 比对一个恒为 null 的列只会制造"看起来通过了"的噪声。
   const pages = await sql`
     select document_id, page_no, storage_key, content_sha256, byte_size, mime_type,
-           width, height, thumb_key, page_label, capture_order
+           width, height, page_label, capture_order
     from document_page order by storage_key`;
   return {
     people: people.map((r) => ({ ...r })),

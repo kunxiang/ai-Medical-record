@@ -7,7 +7,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, ListObjectVersionsCommand } from '@aws-sdk/client-s3';
-import { chromium, type Browser, type Page } from 'playwright';
+import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import { uuidv7 } from 'uuidv7';
 import { parseKey } from '@amr/storage';
 import { adminClient, BUCKET } from './s3-admin.js';
 
@@ -72,9 +73,43 @@ async function apiCall(method: string, p: string, token: string | null, body?: u
   return { status: r.status, json, text, headers: r.headers };
 }
 
+/** 纯 API 的单页登记:presign → 直传 → 登记。A6/A7b 需要绕开浏览器精确控制 payload。 */
+async function apiRegister(o: {
+  token: string; personId: string; fixture: string; clientDocId: string;
+  capturedAt: string; exif: unknown;
+}): Promise<{ status: number; json: any; text: string }> {
+  const meta = FIX[o.fixture]!;
+  const bytes = readFileSync(path.join(ROOT, 'fixtures/m1', meta.file));
+  const pre = await apiCall('POST', '/api/v1/uploads/presign', o.token, {
+    person_id: o.personId,
+    files: [{ filename: meta.file, mime_type: meta.mime, byte_size: meta.bytes, sha256: meta.sha256 }],
+  });
+  if (pre.status >= 300) throw new Error(`presign ${pre.status}: ${pre.text.slice(0, 200)}`);
+  const up = pre.json.uploads[0];
+  const put = await fetch(up.url, { method: 'PUT', headers: up.headers, body: bytes });
+  if (!put.ok) throw new Error(`S3 PUT ${put.status}: ${(await put.text()).slice(0, 200)}`);
+  const sharp = (await import('sharp')).default;
+  const dim = await sharp(bytes).metadata();
+  return apiCall('POST', '/api/v1/documents', o.token, {
+    person_id: o.personId, person_confirmed: true, confirmed_by: 'api',
+    batch_id: pre.json.batch_id, source: 'album', captured_at: o.capturedAt,
+    pages: [{
+      upload_id: up.upload_id, page_no: 1, capture_order: 1,
+      width: dim.width, height: dim.height, sha256: meta.sha256, exif: o.exif,
+    }],
+    client_document_id: o.clientDocId,
+  });
+}
+
+/** 该 person 的文档总数(personId 在 A1 赋值,本函数只在其后调用) */
+const docCount = async (t: string): Promise<number> =>
+  (await apiCall('GET', `/api/v1/documents?person_id=${personId}&limit=99`, t)).json?.documents?.length ?? -1;
+
 type Snap = Array<{ client_document_id: string; state: string; attempt: number; person_id: string | null; page_count: number; captured_at: string; last_error: unknown }>;
 const snapshot = (page: Page) => page.evaluate(() => (globalThis as any).__amr.queueSnapshot() as Promise<Snap>);
 const runQueue = (page: Page) => page.evaluate(() => (globalThis as any).__amr.runQueue());
+/** 驱动一轮但不被"挂起点"卡死:pauseAt 命中后 tick 永不 settle(这正是它要模拟的进程消失)。 */
+const driveQueue = (page: Page) => Promise.race([runQueue(page).catch(() => {}), sleep(1500)]);
 
 async function waitForQueue(page: Page, pred: (s: Snap) => boolean, ms = 90_000): Promise<Snap> {
   const t0 = Date.now();
@@ -82,7 +117,7 @@ async function waitForQueue(page: Page, pred: (s: Snap) => boolean, ms = 90_000)
   while (Date.now() - t0 < ms) {
     last = await snapshot(page);
     if (pred(last)) return last;
-    await runQueue(page).catch(() => {});
+    await driveQueue(page);
     await sleep(700);
   }
   return last;
@@ -230,7 +265,9 @@ if (exifDoc) {
 console.log('A5 上传中途重载');
 await page.evaluate(() => (globalThis as any).__amr.pauseAt('put', 1));
 await page.evaluate(() => (globalThis as any).__amr.enqueueFixture('page-1.jpg'));
-await runQueue(page).catch(() => {});
+// 挂起点命中后 tick 永不返回(模拟进程消失)⇒ 只能 fire-and-forget,靠 reload 收场
+void page.evaluate(() => (globalThis as any).__amr.runQueue()).catch(() => {});
+await waitForQueue(page, (s) => s.some((i) => i.state === 'uploading'), 30_000);
 await page.reload({ waitUntil: 'domcontentloaded' });
 await page.getByTestId('person-picker').waitFor({ timeout: 20_000 });
 snap = await waitForQueue(page, (s) => s.length === 0, 90_000);
@@ -238,6 +275,159 @@ check('A5 重载后续跑至完成', snap.length === 0, JSON.stringify(snap.map(
 const afterA5 = (await apiCall('GET', `/api/v1/documents?person_id=${personId}&limit=50`, token)).json.documents.length;
 check('A5 无重复文档(幂等生效)', afterA5 === 7, `实际 ${afterA5}`);
 check('A5 _incoming 无残留', (await listAll('_incoming/')).length === 0);
+
+// ── A6 幂等重放(审核 #002 A-1 的回归测试)──
+// 旧口径拿整包 canonical payload 比对 ⇒ 重试必然重新 presign ⇒ batch_id 变 ⇒ 每次重试都 409 终止。
+console.log('A6 幂等重放');
+const A6_CDID = uuidv7();
+const A6_AT = '2024-03-15T08:30:00.000Z';
+const r1 = await apiRegister({ token, personId, fixture: 'page-2', clientDocId: A6_CDID, capturedAt: A6_AT, exif: null });
+check('A6 首次登记 201', r1.status === 201, `status=${r1.status} ${r1.text.slice(0, 160)}`);
+const beforeReplay = await docCount(token);
+// 重新 presign(batch_id / upload_id 必变)且换掉 exif —— 三者都不进指纹
+const r2 = await apiRegister({
+  token, personId, fixture: 'page-2', clientDocId: A6_CDID, capturedAt: A6_AT,
+  exif: { captured_at: null, orientation: 3 },
+});
+check('A6 重放 200 幂等命中(而非 409)', r2.status === 200, `status=${r2.status} code=${r2.json?.error?.code}`);
+check('A6 重放返回同一文档', r2.json?.id === r1.json?.id, `${r2.json?.id} vs ${r1.json?.id}`);
+check('A6 文档总数不变', (await docCount(token)) === beforeReplay);
+// 语义确实变了的 payload 仍须 409 —— 否则幂等就成了"永远命中"
+const r3 = await apiRegister({ token, personId, fixture: 'page-3', clientDocId: A6_CDID, capturedAt: A6_AT, exif: null });
+check('A6 异 payload 仍 409', r3.status === 409 && r3.json?.error?.code === 'duplicate_client_document_id',
+  `status=${r3.status} code=${r3.json?.error?.code}`);
+
+// ── A7b 终止态:保留本地原件,给两个动作 ──
+console.log('A7b 终止错误不自动删除');
+await page.evaluate(() => (globalThis as any).__amr.enqueueFixture('page-1.jpg'));
+const a7bLocal = (await snapshot(page))[0]!.client_document_id;
+// 挂到 A6 已登记的 client_document_id 上 ⇒ 登记撞异 payload 409 ⇒ 走产品自己的"未列举 4xx = terminal"
+await page.evaluate(
+  ([o, n]) => (globalThis as any).__amr.retagClientDocumentId(o, n),
+  [a7bLocal, A6_CDID],
+);
+snap = await waitForQueue(page, (s) => s.some((i) => i.state === 'failed_terminal'), 60_000);
+const a7b = snap.find((i) => i.client_document_id === A6_CDID);
+check('A7b 停在 failed_terminal', a7b?.state === 'failed_terminal', JSON.stringify(snap.map((s) => s.state)));
+const a7bDigest = await page.evaluate((id) => (globalThis as any).__amr.blobDigest(id, 1), A6_CDID);
+check('A7b 本地原件未被删除', !!a7bDigest && a7bDigest.sha256 === FIX['page-1']!.sha256, JSON.stringify(a7bDigest));
+check('A7b UI 给出"重试"动作', await page.getByTestId(`retry-${A6_CDID}`).count() > 0);
+check('A7b UI 给出"放弃"动作', await page.getByTestId(`discard-${A6_CDID}`).count() > 0);
+
+// ── A8 放弃:二次确认 → 上报 journal → 重放只一行 ──
+console.log('A8 放弃与上报');
+const journalBefore = await listAll(`people/${personSlug}/journal/`);
+await page.getByTestId(`discard-${A6_CDID}`).click();
+await page.getByTestId(`discard-confirm-${A6_CDID}`).click();
+snap = await waitForQueue(page, (s) => !s.some((i) => i.client_document_id === A6_CDID), 60_000);
+check('A8 本地已清除', !snap.some((i) => i.client_document_id === A6_CDID), JSON.stringify(snap.map((s) => s.state)));
+check('A8 本地 blob 一并清除', (await page.evaluate((id) => (globalThis as any).__amr.blobDigest(id, 1), A6_CDID)) === null);
+const journalKeys = await listAll(`people/${personSlug}/journal/`);
+check('A8 journal 文件存在', journalKeys.length >= journalBefore.length && journalKeys.length > 0);
+const discardLines = () =>
+  Promise.all(journalKeys.map(getText)).then((ts) =>
+    ts.join('\n').split('\n').filter((l) => l.includes('"capture_discard"')));
+let dl = await discardLines();
+check('A8 journal 恰一行 capture_discard', dl.length === 1, `${dl.length} 行`);
+const discardEvent = dl.length === 1 ? JSON.parse(dl[0]!) : {};
+check('A8 该行含 client_document_id 与 event_id',
+  discardEvent.client_document_id === A6_CDID && typeof discardEvent.event_id === 'string',
+  JSON.stringify(discardEvent).slice(0, 200));
+// 重放同一 discard_event_id(客户端补报场景)
+const replay = await apiCall('POST', '/api/v1/captures/discard', token, {
+  person_id: personId, client_document_id: A6_CDID, discard_event_id: discardEvent.event_id,
+  captured_at: A6_AT, page_count: 1, reason: 'terminal_error', detail: null,
+});
+check('A8 重放 2xx', replay.status < 300, `status=${replay.status} ${replay.text.slice(0, 160)}`);
+dl = await discardLines();
+check('A8 重放后仍恰一行(服务端幂等)', dl.length === 1, `${dl.length} 行`);
+
+// ── A11 改归属 ──
+console.log('A11 改归属');
+const personBRes = await apiCall('POST', '/api/v1/people', token, {
+  display_name: '测试患儿B', birth_date: '2020-02-02', sex_at_birth: 'female', relation_to_owner: 'child',
+});
+const personB = { id: personBRes.json.id as string, slug: personBRes.json.slug as string, display_name: '测试患儿B' };
+await page.reload({ waitUntil: 'domcontentloaded' });      // 刷新 people_cache
+await page.getByTestId('person-picker').waitFor({ timeout: 20_000 });
+await page.getByTestId(`person-${personB.slug}`).waitFor({ timeout: 20_000 });
+await page.getByTestId(`person-${personSlug}`).click();   // 归属人显式定为 A,后续断言才有确定含义
+await ctx.setOffline(true);
+await page.evaluate(() => (globalThis as any).__amr.enqueueFixture('page-3.jpg'));
+const a11Id = (await snapshot(page)).find((s) => s.state === 'pending')!.client_document_id;
+await page.getByTestId(`reassign-${a11Id}-${personB.slug}`).click();
+await ctx.setOffline(false);
+snap = await waitForQueue(page, (s) => s.length === 0, 60_000);
+check('A11 改归属后上传完成', snap.length === 0, JSON.stringify(snap.map((s) => [s.state, s.last_error])));
+const bKeys = await listAll(`people/${personB.slug}/`);
+check('A11 原件落在新归属人前缀下', bKeys.some((k) => /page-01\.jpg$/.test(k)), bKeys.join(',').slice(0, 200));
+// uploading 中禁止改:pauseAt('put') 真挂起 ⇒ 该项确定性停在 uploading
+await page.evaluate(() => (globalThis as any).__amr.pauseAt('put', 1));
+await page.evaluate(() => (globalThis as any).__amr.enqueueFixture('page-2.jpg'));
+void page.evaluate(() => (globalThis as any).__amr.runQueue()).catch(() => {});
+snap = await waitForQueue(page, (s) => s.some((i) => i.state === 'uploading'), 30_000);
+const upId = snap.find((i) => i.state === 'uploading')?.client_document_id;
+check('A11 命中挂起点后项停在 uploading', !!upId, JSON.stringify(snap.map((s) => s.state)));
+if (upId) {
+  const rej = await page.evaluate(
+    ([id, p]) => (globalThis as any).__amr.reassign(id, p),
+    [upId, personB] as [string, typeof personB],
+  );
+  check('A11 uploading 中改归属被拒', rej?.ok === false && String(rej.message).includes('不可更改'),
+    JSON.stringify(rej));
+  check('A11 uploading 项无改归属按钮', await page.getByTestId(`reassign-${upId}-${personB.slug}`).count() === 0);
+}
+// 重载让挂起的那一项走崩溃恢复,跑完再继续
+await page.reload({ waitUntil: 'domcontentloaded' });
+await page.getByTestId('person-picker').waitFor({ timeout: 20_000 });
+snap = await waitForQueue(page, (s) => s.length === 0, 90_000);
+check('A11 挂起项重载后由崩溃恢复续跑完成', snap.length === 0, JSON.stringify(snap.map((s) => [s.state, s.attempt])));
+
+// ── A16 401:队列暂停不清空,重新登录后续跑 ──
+console.log('A16 登录失效');
+await page.getByTestId(`person-${personSlug}`).click();
+await ctx.setOffline(true);
+await page.evaluate(() => (globalThis as any).__amr.enqueueFixture('page-1.jpg'));
+const a16Before = (await snapshot(page)).length;
+await page.evaluate(() => (globalThis as any).__amr.corruptToken());
+await ctx.setOffline(false);
+await driveQueue(page);
+await page.getByTestId('login-email').waitFor({ timeout: 20_000 });
+check('A16 401 后回到登录界面', await page.getByTestId('login-email').count() > 0);
+check('A16 token 已清除', (await page.evaluate(() => (globalThis as any).__amr.hasToken())) === false);
+const a16Snap = await snapshot(page);
+check('A16 队列未被清空', a16Snap.length === a16Before, `${a16Snap.length} vs ${a16Before}`);
+const docsBeforeRelogin = await docCount(token);
+await page.getByTestId('login-email').fill(EMAIL);
+await page.getByTestId('login-password').fill(PASSWORD);
+await page.getByTestId('login-submit').click();
+await page.getByTestId('person-picker').waitFor({ timeout: 20_000 });
+snap = await waitForQueue(page, (s) => s.length === 0, 90_000);
+check('A16 重新登录后队列续跑至完成', snap.length === 0, JSON.stringify(snap.map((s) => [s.state, s.last_error])));
+check('A16 服务端确实多了一份', (await docCount(token)) === docsBeforeRelogin + 1);
+
+// ── A15 存储配额与持久化降级(独立 context:stub StorageManager)──
+console.log('A15 配额与持久化');
+const ctx2: BrowserContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+await ctx2.addInitScript(() => {
+  Object.defineProperty(navigator, 'storage', {
+    configurable: true,
+    value: {
+      persisted: async () => false,
+      persist: async () => false,
+      estimate: async () => ({ quota: 100 * 1024 * 1024, usage: 99 * 1024 * 1024 }),   // 剩 1 MB
+    },
+  });
+});
+const page2 = await ctx2.newPage();
+await login(page2);
+check('A15 未获持久化授权时有降级提示', await page2.getByTestId('persist-warning').count() > 0);
+await page2.getByTestId('input-album').setInputFiles(path.join(ROOT, 'fixtures/m1/photo-plain.png'));
+await page2.getByTestId('capture-error').waitFor({ timeout: 15_000 });
+const quotaMsg = (await page2.getByTestId('capture-error').textContent()) ?? '';
+check('A15 剩余不足时入队被拒并提示', quotaMsg.includes('存储空间不足'), quotaMsg.slice(0, 120));
+check('A15 被拒项未进队列', (await snapshot(page2)).length === 0);
+await ctx2.close();
 
 // ── A9 连拍多页 ──
 console.log('A9 连拍三页');
@@ -271,7 +461,7 @@ console.log('A10 先拍后选');
 await page.evaluate(() => (globalThis as any).__amr.enqueueFixture('photo-plain.png', { personId: null }));
 snap = await snapshot(page);
 check('A10 无归属人时为 pending_person', snap[0]?.state === 'pending_person', snap[0]?.state);
-await runQueue(page);
+await driveQueue(page);
 check('A10 pending_person 不发起上传', (await snapshot(page))[0]?.state === 'pending_person');
 await page.getByTestId('needs-person').waitFor({ timeout: 5000 }).catch(() => {});
 check('A10 UI 有待归人红条', await page.getByTestId('needs-person').count() > 0);
@@ -317,6 +507,12 @@ if (pdfDoc) {
 // ── A17 L1 基线(此后只做 L2 活动)──
 const l1Before = await l1Snapshot();
 
+// B3/B4 的取样点:清空重建前先记下派生物字节与源 EXIF
+const derivSampleKey = exifDoc ? `derived/${personSlug}/${exifDoc.short_id}/thumb-01.webp` : null;
+const derivSha1 = derivSampleKey
+  ? createHash('sha256').update(await getBytes(derivSampleKey)).digest('hex')
+  : null;
+
 // ── A18 L2 可丢 ──
 console.log('A18 L2 可丢');
 execSync('npx tsx src/regen-derivatives.ts --purge', { cwd: path.join(ROOT, 'tools'), stdio: 'pipe' });
@@ -326,6 +522,23 @@ check('A18 惰性路径重新生成', relazy.status === 302 && relazy.headers.ge
 execSync('npx tsx src/regen-derivatives.ts --regen', { cwd: path.join(ROOT, 'tools'), stdio: 'pipe' });
 check('A18 regen 工具重建成功', (await listAll('derived/')).length > 1);
 check('A17 L1 零字节变动(A 组全程)', (await l1Snapshot()) === l1Before);
+
+// ── B3/B4 派生物性质 ──
+console.log('B3/B4 派生物性质');
+if (derivSampleKey && derivSha1) {
+  const derivSha2 = createHash('sha256').update(await getBytes(derivSampleKey)).digest('hex');
+  check('B3 派生物确定性(清空重建后字节相同)', derivSha1 === derivSha2, `${derivSha1.slice(0, 12)} vs ${derivSha2.slice(0, 12)}`);
+  // B4 强断言:源必须真的带 GPS,否则"派生物无 GPS"是空断言
+  const exifr = (await import('exifr')).default;
+  const origBytes = readFileSync(path.join(ROOT, 'fixtures/m1', FIX['photo-gps-o6']!.file));
+  const srcGps = await exifr.gps(origBytes).catch(() => undefined);
+  check('B4 源含 GPS(前置:否则镜像断言为空)',
+    typeof srcGps?.latitude === 'number' && typeof srcGps?.longitude === 'number', JSON.stringify(srcGps));
+  const derGps = await exifr.gps(await getBytes(derivSampleKey)).catch(() => undefined);
+  check('B4 派生物无 GPS', !derGps || derGps.latitude === undefined, JSON.stringify(derGps));
+} else {
+  check('B3/B4 取样点存在', false, 'exifDoc 缺失');
+}
 
 // ── A20 矩阵覆盖 ──
 console.log('A20 矩阵覆盖');
@@ -349,6 +562,24 @@ const afterRotate = await apiCall('GET', `/api/v1/documents?person_id=${personId
 check('B9(D12)改密码后旧 token 立即 401', afterRotate.status === 401, `status=${afterRotate.status}`);
 
 await browser.close();
+
+// ── A19 重建演练(放最后:要删库)──
+console.log('A19 重建演练');
+const TOOLS = path.join(ROOT, 'tools');
+const sh = (cmd: string, cwd = TOOLS): string => {
+  try { return execSync(cmd, { cwd, encoding: 'utf-8', env: { ...process.env, SEED_EMAIL: EMAIL, SEED_PASSWORD: PASSWORD } }); }
+  catch (e: any) { return String(e.stdout ?? '') + String(e.stderr ?? ''); }
+};
+sh('npx tsx src/verify-rebuild.ts --dump /tmp/m1-snapshot.json');
+sh(`docker compose -f ${ROOT}/infra/docker-compose.yml exec -T postgres psql -U amr -d amr -q -c 'drop schema public cascade; create schema public; drop schema if exists drizzle cascade;'`, ROOT);
+sh('pnpm --filter @amr/api --silent run db:migrate', ROOT);
+sh('pnpm --silent run seed-account');
+const rebuildOut = sh('pnpm --silent run rebuild-index');
+check('A19 rebuild 完成', rebuildOut.includes('documents restored'), rebuildOut.slice(-300));
+// capture_discard 是 journal 事件,不是 manifest add —— 不该被当成幽灵行进对账报告
+check('A19 capture_discard 不进对账报告', !rebuildOut.includes(A6_CDID), rebuildOut.slice(-300));
+const compareOut = sh('npx tsx src/verify-rebuild.ts --compare /tmp/m1-snapshot.json');
+check('A19 重建等价性通过(穷尽字段表)', compareOut.includes('重建等价性通过'), compareOut.slice(-600));
 console.log(`\n通过 ${passed} 项;失败 ${failed.length} 项`);
 if (failed.length) {
   console.error('失败清单:\n- ' + failed.join('\n- '));
