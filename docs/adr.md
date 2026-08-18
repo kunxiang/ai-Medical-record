@@ -765,7 +765,21 @@ AI 读 → 确定性判定对错 → AI 带着判定结果重读 → 确定性�
 4. `provision-bucket` 需按后端分流:MinIO 走 Object Lock,R2 走 Bucket Locks;两者都必须跑**行为自检**而非配置自检(沿用 m1/CHANGES #2 的教训)。
 5. 冷备是**必须项**而非增强项,且必须落到支持 Object Lock 的存储或离线介质。L1 可整体打包迁移(ADR-045 的设计红利)使这件事成本很低。
 
-**未决(需 Admin 档 token 复验):** Bucket Locks 能否覆盖全部 L1 前缀、CORS 与 lifecycle 能否经 S3 API 配置。在复验通过前,本 ADR 不得视为已落地。
+**Admin 档 token 复验结果(2026-08-18):**
+
+| 项 | 结论 |
+|---|---|
+| CORS(`PutBucketCors`/`GetBucketCors`) | ✅ 经 S3 API 可配,已落地并通过 preflight 行为自检 |
+| Lifecycle(`PutBucketLifecycleConfiguration`) | ✅ 已落地 `incoming-cleanup`(7 天 + 分片中止 1 天)与 `probe-cleanup` |
+| `PutBucketVersioning` / `ListObjectVersions` | ❌ **501 NotImplemented**(admin 档下仍然)—— 确证 R2 无对象版本化,非权限问题 |
+| `PutObjectRetention` | ❌ **501 NotImplemented** —— 确证无逐对象保留锁 |
+| `PutObjectLockConfiguration`(`?object-lock`) | ❌ **501 NotImplemented**(`GET` 返 404 说明该 API 存在但无配置,`PUT` 未实现) |
+| `?lock` 子资源 | ❌ 501 —— R2 Bucket Locks **不经 S3 API 暴露** |
+| Cloudflare 控制面(`api.cloudflare.com`) | ⛔ 本开发环境的出网策略拒绝 CONNECT(403),无法从此处配置 |
+
+**因此:** 补偿措施②(前缀级保留策略)**只能由项目所有者经 Cloudflare 控制台或 `wrangler r2 bucket lock` 配置**,或把 `api.cloudflare.com` 加进环境出网白名单后由脚本配置。在②与③落实之前,本桶不得承载生产 L1 —— `provision-bucket` 现在会把这一姿态原样打印,不再"自检通过"了事。
+
+**同批落地的实现改动:** `provision-bucket` 改为**探测后端能力再分流**(而非假定 S3 语义),并如实播报 WORM 姿态;`s3-admin` 的签名区域按后端选择(R2 须 `auto`),MinIO 的 Content-MD5 兼容中间件对 R2 关闭;CORS 的 `AllowedHeaders` 取并集(同时含 `x-amz-checksum-sha256` 与 `content-md5`)—— 少放一个头要重新取 admin 凭证,多放几个不构成风险,不对称,故取并集。
 
 ---
 

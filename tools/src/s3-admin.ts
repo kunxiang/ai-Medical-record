@@ -4,6 +4,8 @@ import { createHash } from 'node:crypto';
 
 export const ENDPOINT = process.env.S3_ENDPOINT ?? 'http://localhost:9100';
 export const BUCKET = process.env.S3_BUCKET ?? 'medical-record';
+// R2 要求 region='auto';MinIO/S3 用 us-east-1。签名区域不匹配会直接 SignatureDoesNotMatch。
+export const REGION = process.env.S3_REGION ?? (ENDPOINT.includes('r2.cloudflarestorage.com') ? 'auto' : 'us-east-1');
 
 // MinIO 对新版 SDK 默认附加的 CRC32 校验和头返回 501 NotImplemented。
 // 'WHEN_REQUIRED' 只在显式指定(如上传时的 ChecksumSHA256)时发送 —— 上传链的
@@ -37,11 +39,15 @@ function applyMinioBucketConfigCompat(client: S3Client): S3Client {
   return client;
 }
 
+const IS_R2 = ENDPOINT.includes('r2.cloudflarestorage.com');
+
 export function adminClient(): S3Client {
-  return applyMinioBucketConfigCompat(new S3Client({
+  // R2 自己就接受 flexible checksum,不需要(也不应该)套 MinIO 的兼容中间件
+  const wrap = IS_R2 ? (c: S3Client) => c : applyMinioBucketConfigCompat;
+  return wrap(new S3Client({
     ...CHECKSUM_COMPAT,
     endpoint: ENDPOINT,
-    region: 'us-east-1',
+    region: REGION,
     forcePathStyle: true,
     credentials: {
       accessKeyId: process.env.S3_ADMIN_KEY ?? 'amr-admin',
@@ -54,7 +60,7 @@ export function appClient(): S3Client {
   return new S3Client({
     ...CHECKSUM_COMPAT,
     endpoint: ENDPOINT,
-    region: 'us-east-1',
+    region: REGION,
     forcePathStyle: true,
     credentials: {
       accessKeyId: process.env.S3_ACCESS_KEY ?? 'amr-app',
