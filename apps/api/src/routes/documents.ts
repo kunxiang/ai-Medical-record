@@ -191,10 +191,24 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
       }
       crashPoint('after-copy'); // A8 崩溃注入点(仅测试)
 
-      // 5. WORM sidecars
+      // 5. WORM sidecars。
+      // 续跑语义:最终 key 已有 capture.json 时它就是权威(WORM 写过即定),
+      // 采纳其中的 document_id/created_at —— 否则重试方重新生成的 id 会使字节比对必然失败。
       const firstFile = fileById.get(input.pages.find((p) => p.page_no === 1)!.upload_id)!;
-      const documentId = newId();
-      const createdAt = serverTimestamp();
+      const captureKeyEarly = buildKey.capture({ personSlug, captureDate, docShortId });
+      const priorCapture = await getObjectText(captureKeyEarly);
+      let documentId = newId();
+      let createdAt = serverTimestamp();
+      if (priorCapture) {
+        const parsed = CaptureSidecar.safeParse(JSON.parse(priorCapture.text));
+        if (parsed.success && parsed.data.client_document_id === input.client_document_id) {
+          documentId = parsed.data.document_id;
+          createdAt = parsed.data.created_at;
+        } else {
+          app.log.error({ key: captureKeyEarly }, '既有 capture.json 与本请求不属同一逻辑文档 —— 报警');
+          throw new ApiError('internal_error', '存储不一致,已记录待人工处理');
+        }
+      }
       for (const s of staged) {
         const pageJson = PageSidecar.parse({
           schema_version: '2.0', document_short_id: docShortId, page_no: s.pageNo,
@@ -220,8 +234,7 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
         })),
         created_at: createdAt,
       });
-      const captureKey = buildKey.capture({ personSlug, captureDate, docShortId });
-      await putWormIdempotent(captureKey, canonicalJson(capture), app);
+      await putWormIdempotent(captureKeyEarly, canonicalJson(capture), app);
       crashPoint('after-sidecar');
 
       // 6. DB 事务(manifests 追加为 COMMIT 前最后动作)

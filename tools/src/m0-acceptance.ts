@@ -235,7 +235,7 @@ const bPerson = await api('GET', `/api/v1/people/${personId}`, { token: tokenB }
 const bDoc = await api('GET', `/api/v1/documents/${docId}`, { token: tokenB });
 const bPage = await api('GET', `/api/v1/documents/${docId}/pages/1/url`, { token: tokenB });
 const missing = await api('GET', `/api/v1/people/00000000-0000-4000-8000-000000000000`, { token: tokenB });
-check('A9 B 账号访问 A 的 person/document/页 → 404', bPerson.status === 404 && bDoc.status === 404 && bPage.status === 404);
+check('A9 B 账号访问 A 的 person/document/页 → 404', bPerson.status === 404 && bDoc.status === 404 && bPage.status === 404, `person=${bPerson.status} doc=${bDoc.status} page=${bPage.status} ${bDoc.text.slice(0, 120)} ${bPage.text.slice(0, 120)}`);
 check('A9 无权与不存在响应体一致', bPerson.text === missing.text);
 const noAuth = await api('GET', '/api/v1/people');
 check('A9 无 token → 401', noAuth.status === 401);
@@ -328,7 +328,7 @@ const archivedPersonJson = JSON.parse(await getText(`people/${personSlug}/_perso
 check('A11 _person.json 含 archived_at(死档不复活的前提)', archivedPersonJson.archived_at !== null);
 
 // A10:dump → drop → migrate → seed → 注入幽灵行 → rebuild → compare
-execSync('pnpm --silent run verify-rebuild -- --dump /tmp/m0-snapshot.json', { stdio: 'pipe' });
+execSync('npx tsx src/verify-rebuild.ts --dump /tmp/m0-snapshot.json', { stdio: 'pipe' });
 const REPO_ROOT = process.env.REPO_ROOT ?? new URL('../..', import.meta.url).pathname;
 execSync(
   `docker compose -f ${REPO_ROOT}/infra/docker-compose.yml exec -T postgres psql -U amr -d amr -q -c 'drop schema public cascade; create schema public;'`,
@@ -354,7 +354,7 @@ const rebuildOut = execSync('pnpm --silent run rebuild-index', { encoding: 'utf-
 check('A10 rebuild 报告幽灵行进对账', rebuildOut.includes('幽灵行') || rebuildOut.includes('dzzzzz'));
 const compare = (() => {
   try {
-    return execSync('pnpm --silent run verify-rebuild -- --compare /tmp/m0-snapshot.json', { encoding: 'utf-8' });
+    return execSync('npx tsx src/verify-rebuild.ts --compare /tmp/m0-snapshot.json', { encoding: 'utf-8' });
   } catch (e: any) {
     return String(e.stdout ?? '') + String(e.stderr ?? '');
   }
