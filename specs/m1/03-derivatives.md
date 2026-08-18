@@ -7,7 +7,7 @@ derived/{person_slug}/{doc_short_id}/thumb-NN.webp     ≤ 400px 长边
 derived/{person_slug}/{doc_short_id}/preview-NN.webp   ≤ 1600px 长边
 ```
 
-已在 04 §1 权威矩阵的 `derived/**` 行内(L2 · 随时重写 · **严禁上锁** · 打包可丢 · 备份不带)—— **无需新增矩阵行**。`packages/storage` 增两个 key 构造器与对应 parse 规则(BNF 追加,往返测试覆盖)。
+已在 `docs/04` §1 权威矩阵的 `derived/**` 行内(L2 · 随时重写 · **严禁上锁** · 打包可丢 · 备份不带)—— **无需新增矩阵行**。`packages/storage` 增两个 key 构造器与对应 parse 规则(BNF 追加,往返测试覆盖)。
 
 > ⚠️ 生成缩略图时**禁止**触碰 `people/**` 下任何对象(只读取原件)。这是 ADR-045 "L2 升级时 L1 零字节变动"的直接可测形式。
 
@@ -19,10 +19,14 @@ derived/{person_slug}/{doc_short_id}/preview-NN.webp   ≤ 1600px 长边
 | 尺寸 | thumb:长边 400px;preview:长边 1600px。**只缩不放**(源小于目标则保持原尺寸) |
 | 方向 | 先按 EXIF Orientation 旋正(`.rotate()`),再缩放 |
 | 格式 | WebP,`quality: 82`,`effort: 4` |
-| 元数据 | **剥离全部 EXIF/ICC**(派生物不携带 GPS 等 PII;原件仍完整保留在 L1) |
+| 元数据 | **剥离全部 EXIF/ICC**(派生物不携带 GPS 等 PII;原件仍完整保留在 L1) —— 这是 ADR-031 PII 最小化在派生层的落地:**原图里当然仍有这些信息,但它们不进入派生物、不进入索引、不进入 embedding**(与 ADR-044「索引层出现手机号即失败」同源) |
 | 并发 | 单请求内串行;`sharp.concurrency(1)` 防止内存尖峰 |
 
-同版本 sharp + 同参数 + 同输入 ⇒ 输出字节一致(验收 B 组断言:同一页生成两次 sha256 相同)。
+**同一二进制环境内**(同 sharp/libvips/libwebp 版本、同 CPU 特性路径)⇒ 输出字节一致;跨版本升级不作此承诺(验收 B 组断言:同一进程内同一页生成两次 sha256 相同)。
+
+`sharp.concurrency(1)` 在**进程启动时**设置一次 —— 它是进程级全局,写在请求处理里是全局副作用。
+
+剥离 ICC 会让广色域(Display P3)源图的派生物出现可见色偏;原件完整保留,属浏览层问题,M4 再议(审核 #002 C 档,显式接受)。
 
 ## 3. 惰性生成(M1 的显式取舍)
 
@@ -33,9 +37,9 @@ derived/{person_slug}/{doc_short_id}/preview-NN.webp   ≤ 1600px 长边
 代价与缓解(**必须实现**):
 - 首次浏览会逐张触发生成 → 客户端**必须**按视口懒加载(`loading="lazy"` + IntersectionObserver),不一次性请求整页。
 - 同一 key 的并发生成:允许重复生成(幂等覆盖,写入结果相同),**不加锁** —— 派生区无一致性要求。
-- 单次生成超时 10s → 422,不阻塞其他请求。
+- 单次生成 10s **软超时**:提前返回 422 并记日志,但 sharp 的解码/缩放不可取消,工作线程仍会跑完 —— 因此软超时只用于释放请求,不作为资源保护手段(资源保护靠 `concurrency(1)`)。
 
-`[偏差:vs 04 §6 "缩略图在服务端生成" —— 04 未规定生成时机;此处定为惰性。M2 引入任务队列后可改为登记后预生成,届时 L1 不受影响。]`
+`[偏差:vs docs/04 §6「缩略图在服务端生成」(未规定时机)、docs/07 §9 的后台任务示例含 `{"type":"thumbnail"}`、docs/02 §1 的 `jobs/` 目录注释 —— 此处定为惰性同步生成,理由:不提前造 M2 的任务队列,且派生物按 ADR-045 本就可再生。M2 引入队列后可改预生成,届时 L1 不受影响。须回写三处。]`
 
 ## 4. PDF 与不可解码源
 
@@ -46,4 +50,6 @@ derived/{person_slug}/{doc_short_id}/preview-NN.webp   ≤ 1600px 长边
 ## 5. 清理与重建
 
 - 文档软删除**不删** `derived/`(删了也无妨;M1 不做)。
-- 提供 `tools/regen-derivatives.ts`:删光 `derived/**` 后按 DB 遍历重生成 —— 这是验收 A3-4 "L2 可丢"的执行体。
+- 提供 `tools/regen-derivatives.ts`:删光 `derived/**` 后按 DB 遍历重生成 —— "L2 可丢"的执行体之一。
+  ⚠️ 删除 `derived/**` 必须用 **admin 凭证**(`tools/src/s3-admin.ts` 的 `adminClient()`)—— 应用策略(`infra/minio-app-policy.json`)只给 `_incoming/*` 与 `_probe/*` 的删除权,应用凭证删不掉 `derived/`(审核 #002 B-6)。
+- **不写 `document_page.thumb_key`**(审核 #002 A-2):判定以 HeadObject 为准,该列写了也不读;写它会把 L2 缓存混进 L1 重建等价性的比对字段表。立规:**凡值只能由 L2 生成的 DB 列,一律排除于重建等价性之外。**

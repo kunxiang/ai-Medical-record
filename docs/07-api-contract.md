@@ -191,6 +191,10 @@ GET    /api/v1/documents/:id              详情(含页、提取、问答)
 PATCH  /api/v1/documents/:id              仅允许改 encounter_id / doc_type
 DELETE /api/v1/documents/:id              软删除;S3 原件不删
 GET    /api/v1/documents/:id/pages/:n/url 取原图预签名 URL(短有效期)
+GET    /api/v1/documents/:id/pages/:n/thumb    缩略图(302 重定向到预签名 URL)
+GET    /api/v1/documents/:id/pages/:n/preview  预览图(同上)
+
+POST   /api/v1/captures/discard           记录"曾拍摄但放弃"(M1;写 journal capture_discard)
 
 GET    /api/v1/encounters
 POST   /api/v1/encounters
@@ -207,7 +211,7 @@ POST   /api/v1/encounters/:id/documents   把文档归入就诊事件
 | `doc_type` | 可多值 |
 | `facility_id` | |
 | `department` | |
-| `from` / `to` | 按 `sampled_on` |
+| `from` / `to` | 按 `sampled_on`;**M1 期按 `capture_date`**(无 AI 日期),M2 引入 `date_field=capture` 后语义迁移须记 CHANGES |
 | `date_field` | `sampled` \| `reported` \| `encounter`,默认 `sampled` |
 | `status` | |
 | `cursor` / `limit` | |
@@ -410,7 +414,9 @@ GET  /api/v1/exports/:id/download         zip(L1 子集,不含任何 derived)
 | 409 | `duplicate_client_document_id` | 幂等键冲突(返回已有文档) |
 | 409 | `document_immutable` | 试图修改不可变字段 |
 | 413 | `file_too_large` | |
+| 415 | `derivative_unavailable` | 该页类型不支持派生物(M1:PDF,设计债 D13) |
 | 422 | `unsupported_media_type` | |
+| 422 | `derivative_generation_failed` | 缩略图解码或缩放失败 |
 | 429 | `rate_limited` | |
 | 500 | `internal_error` | |
 | 503 | `ai_provider_unavailable` | **归档不受影响,仅提取延后** |

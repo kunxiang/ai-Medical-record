@@ -35,11 +35,13 @@
 
 - [ ] PWA 侧接入 M0 既有上传链(presign 直传 + `POST /documents` 幂等键)
 - [ ] PWA:拍照(含连拍模式)、PDF/截图/相册导入
-- [ ] **IndexedDB 离线队列 + Service Worker 后台重试**
+- [ ] **IndexedDB 离线队列 + 前台驱动重试**(ADR-046:iOS 无 Background Sync;SW 只做外壳预缓存)
+- [ ] 采集端 EXIF 读取(`DateTimeOriginal` → `captured_at`;`Orientation` 落 page sidecar)—— 存量旧单据的归档日期正确性依赖它
+- [ ] CORS(API 侧 + 桶侧,M0 挂账)、**D11 权限审计落点**、**D12 token 吊销**(到期债)
 - [ ] 上传队列状态 UI(「3 张待上传」)
 - [ ] journal 双写扩展到 M1 新增的人工输入(机制已在 M0 落地;此后每个产生人工输入的功能都必须接入,ADR-045 / D1)
 - [ ] 缩略图 / 预览图生成
-- [ ] 文档浏览:按人 → 时间轴 → 文档
+- [ ] 文档浏览:按人 → 时间轴 → 文档(只读;**软删除移至 M2**,与归人纠正、文档拆分同批)
 
 **验收:** 飞行模式下拍 5 张 → 恢复网络 → 全部上传成功,一张不丢。
 

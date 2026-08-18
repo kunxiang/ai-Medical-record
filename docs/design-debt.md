@@ -14,5 +14,9 @@
 | D8 | **ADR 合入 checklist**:每条新 ADR 合入时 grep 全仓库枚举 / 代码示例 / roadmap / fixtures 同步 | C9 / A F10 | 即刻生效 | 见 docs/README |
 | D9 | **单人导出 bundle 细则**:decisions 的共享词表类/个人相关类逐 decision_type 分类表;bundle schema 进 contracts;manifests 按人过滤回放的实现 | 二轮审核(ADR-045) | M8 前 | 单人导出演练:导出孩子的 bundle,档案完整(含改归进来的文档)且不含他人隐私 |
 | D10 | **`_meta/` 快照自动化**:schema/注册表变更时先落 `_meta` 再上线(CI 强制);`_meta/README.md` 与 04 文档同步机制 | 二轮审核(ADR-045) | M0 | 断言:`_meta/schemas/` 含当前 schema_version(99 B8) |
-| D11 | **系统级审计落点**:权限授予/撤销、文档删除 → `_index/audit/{YYYY-MM}.jsonl`;M0 的 owner 自动授予可从 journal 推导,显式接受 | m0 spec 审核 #001 | M1 | 授权变更在桶内可追溯 |
-| D12 | **凭证生命周期**:JWT 吊销方案(改密码失效旧 token)+ argon2 参数版本标记与迁移路径 | m0 spec 审核 #001 | M1 前 | 改密码后旧 token 失效 |
+| D11 | **系统级审计落点**:权限授予/撤销 → `_index/audit/{YYYY-MM}.jsonl`(**文档删除部分随软删除移交 M2**,m1 审核 #002 S1) | m0 spec 审核 #001 | M1 | 建档后 audit 出现 access_grant 行(m1-99 B10) |
+| D12 | **凭证生命周期**:JWT 吊销方案(改密码失效旧 token)+ argon2 参数版本标记与迁移路径。**M1 内清偿**:`account.token_epoch` + JWT `ep` claim(m1-02 §6) | m0 spec 审核 #001 | M1 前 | 改密码后旧 token 立即 401(m1-99 B9) |
+| D13 | **PDF 缩略图渲染**:M1 返 415 + 占位图;需 pdfium/poppler 渲染首页 | m1 spec 审核 #002 | M4(与 D5 长文档同批) | PDF 页在浏览中显示首页缩略图而非占位图 |
+| D14 | **分片 + 断点续传**:M1 用整文件单 PUT + 整份重传;预签名 multipart 需三段式(create/part/complete)与服务端状态 | m1 spec 审核 #002(docs/01 §离线优先要点四) | M2 | 弱网下 50 MiB 文件可续传,不因中断整份重来 |
+| D15 | **M1 期错档的事后纠正**:已上传文档的归人纠正(correction-NNNN.json 写入路径)+ 连拍分组纠正(与 D7 同批)+ `from/to` 语义迁移(capture_date → date_field) | m1 spec 审核 #002 | M2 | M1 期产生的错档可纠正,S3 布局不受影响 |
+| D16 | **journal 回放能力**:rebuild 目前从不读 journal(M0/M1 的 journal 事件无 DB 落点);M3 的问答答案是第一个必须回放到 DB 的人工层事件 | m1 spec 审核 #002 | M3 | 删库重建后问答答案零丢失 |
