@@ -118,9 +118,17 @@ export function CaptureView({
         queue={queue}
         people={people}
         onReassign={async (id, p) => {
-          await reassignQueued(id, { id: p.id, slug: p.slug, display_name: p.display_name });
-          await onQueueChanged();
-          void tick('after-reassign');
+          // 上传已开始时 reassignQueued 会拒绝(key 已由 person 决定)——
+          // 按钮此时本应已消失,但状态刷新与点击之间仍有窗口,理由要让用户看见
+          try {
+            setError(null);
+            await reassignQueued(id, { id: p.id, slug: p.slug, display_name: p.display_name });
+            await onQueueChanged();
+            void tick('after-reassign');
+          } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+            await onQueueChanged();
+          }
         }}
         onChanged={onQueueChanged}
       />

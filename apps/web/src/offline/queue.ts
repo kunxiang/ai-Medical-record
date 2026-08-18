@@ -137,6 +137,7 @@ async function processOne(rec: CaptureRecord): Promise<void> {
   }
 
   await putCapture({ ...rec, state: 'uploading', batch });
+  events.onChange?.();   // 状态进 uploading 必须让视图跟上:否则"改归属"按钮还挂在那儿(m1-99 A11)
 
   // ② 直传(整文件单 PUT;分片续传见 D14)
   try {
@@ -153,6 +154,7 @@ async function processOne(rec: CaptureRecord): Promise<void> {
 
   // ③ 登记
   await putCapture({ ...rec, state: 'registering', batch });
+  events.onChange?.();
   try {
     await checkPause('register');
     await api.createDocument({

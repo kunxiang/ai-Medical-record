@@ -423,11 +423,17 @@ await ctx2.addInitScript(() => {
 });
 const page2 = await ctx2.newPage();
 await login(page2);
+// 先证明 stub 真的生效 —— 否则下面两条断言可能只是"真实环境配额很大所以没报错"
+const est = await page2.evaluate(async () => {
+  const e = await navigator.storage.estimate();
+  return { quota: e.quota ?? -1, usage: e.usage ?? -1 };
+});
+check('A15 StorageManager stub 生效', est.quota === 100 * 1024 * 1024 && est.usage === 99 * 1024 * 1024,
+  JSON.stringify(est));
 check('A15 未获持久化授权时有降级提示', await page2.getByTestId('persist-warning').count() > 0);
 await page2.getByTestId('input-album').setInputFiles(path.join(ROOT, 'fixtures/m1/photo-plain.png'));
-await page2.getByTestId('capture-error').waitFor({ timeout: 15_000 });
-const quotaMsg = (await page2.getByTestId('capture-error').textContent()) ?? '';
-check('A15 剩余不足时入队被拒并提示', quotaMsg.includes('存储空间不足'), quotaMsg.slice(0, 120));
+const quotaMsg = await page2.getByTestId('capture-error').textContent({ timeout: 15_000 }).catch(() => '(未出现)');
+check('A15 剩余不足时入队被拒并提示', (quotaMsg ?? '').includes('存储空间不足'), (quotaMsg ?? '').slice(0, 120));
 check('A15 被拒项未进队列', (await snapshot(page2)).length === 0);
 await ctx2.close();
 
