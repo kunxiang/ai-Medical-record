@@ -111,6 +111,11 @@ const runQueue = (page: Page) => page.evaluate(() => (globalThis as any).__amr.r
 /** 驱动一轮但不被"挂起点"卡死:pauseAt 命中后 tick 永不 settle(这正是它要模拟的进程消失)。 */
 const driveQueue = (page: Page) => Promise.race([runQueue(page).catch(() => {}), sleep(1500)]);
 
+const FIXTURE_NAMES = ['photo-plain.png', 'photo-gps-o6.jpg', 'page-1.jpg', 'page-2.jpg', 'page-3.jpg', 'doc-1page.pdf', 'huge.jpg'];
+/** 断网前把 fixture 读进内存 —— 注入面用 fetch 取文件,且 reload 会清空该缓存 */
+const preload = (p: Page) =>
+  p.evaluate((names) => (globalThis as any).__amr.preloadFixtures(names) as Promise<number>, FIXTURE_NAMES);
+
 async function waitForQueue(page: Page, pred: (s: Snap) => boolean, ms = 90_000): Promise<Snap> {
   const t0 = Date.now();
   let last: Snap = [];
@@ -181,12 +186,7 @@ check('A1 people_cache 不含医疗 PII', !cachedFields.includes('allergies') &&
 
 // ── A2 离线拍 5 张 ──
 console.log('A2 离线采集');
-// 断网前把 fixture 读进内存(注入面用 fetch 取文件,断网后取不到)
-const preloaded = await page.evaluate(
-  (names) => (globalThis as any).__amr.preloadFixtures(names) as Promise<number>,
-  ['photo-plain.png', 'photo-gps-o6.jpg', 'page-1.jpg', 'page-2.jpg', 'page-3.jpg', 'doc-1page.pdf', 'huge.jpg'],
-);
-check('A2 fixture 预加载', preloaded === 7, `${preloaded}`);
+check('A2 fixture 预加载', (await preload(page)) === FIXTURE_NAMES.length);
 await ctx.setOffline(true);
 await page.evaluate(() => (globalThis as any).__amr.enqueueFixture('photo-plain.png', { count: 5 }));
 let snap = await snapshot(page);
@@ -352,6 +352,7 @@ await page.reload({ waitUntil: 'domcontentloaded' });      // 刷新 people_cach
 await page.getByTestId('person-picker').waitFor({ timeout: 20_000 });
 await page.getByTestId(`person-${personB.slug}`).waitFor({ timeout: 20_000 });
 await page.getByTestId(`person-${personSlug}`).click();   // 归属人显式定为 A,后续断言才有确定含义
+await preload(page);   // reload 清空了注入面的 fixture 内存缓存
 await ctx.setOffline(true);
 await page.evaluate(() => (globalThis as any).__amr.enqueueFixture('page-3.jpg'));
 const a11Id = (await snapshot(page)).find((s) => s.state === 'pending')!.client_document_id;
@@ -386,6 +387,7 @@ check('A11 挂起项重载后由崩溃恢复续跑完成', snap.length === 0, JS
 // ── A16 401:队列暂停不清空,重新登录后续跑 ──
 console.log('A16 登录失效');
 await page.getByTestId(`person-${personSlug}`).click();
+await preload(page);
 await ctx.setOffline(true);
 await page.evaluate(() => (globalThis as any).__amr.enqueueFixture('page-1.jpg'));
 const a16Before = (await snapshot(page)).length;
