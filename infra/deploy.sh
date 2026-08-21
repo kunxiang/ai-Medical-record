@@ -19,14 +19,8 @@ do_build() {
   need VITE_API_BASE
   # ★ 绝不设 VITE_M1_TEST_HOOKS —— 生产产物不得含测试注入面(m1-99 B6)
   ( cd apps/web && VITE_API_BASE="$VITE_API_BASE" npx vite build )
-  # 兜底自检:产物里出现注入面即失败,不依赖"我记得没设那个变量"
-  if grep -rl --include='*.js' '__amr' apps/web/dist >/dev/null 2>&1; then
-    echo "✗ 生产产物含测试注入面 __amr —— 拒绝发布"; exit 1
-  fi
-  if ! grep -rq "$VITE_API_BASE" apps/web/dist/assets/*.js 2>/dev/null; then
-    echo "✗ 产物中找不到 VITE_API_BASE=$VITE_API_BASE —— 构建期变量未生效,PWA 会打到错误的后端"; exit 1
-  fi
-  echo "  ✓ PWA 产物就绪:apps/web/dist(API base = $VITE_API_BASE,无注入面)"
+  # 兜底自检与 Vercel 构建共用同一份脚本,免得两处漂移(infra/check-web-dist.sh)
+  bash infra/check-web-dist.sh apps/web/dist
 }
 
 do_migrate() { need DATABASE_URL; echo "== 迁移 =="; pnpm --filter @amr/api --silent run db:migrate; }

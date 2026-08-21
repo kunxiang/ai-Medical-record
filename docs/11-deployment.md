@@ -113,8 +113,45 @@ SEED_EMAIL=... SEED_PASSWORD=... pnpm --filter @amr/tools seed-account
 DATABASE_URL=... AUTH_SECRET=... S3_... WEB_ORIGIN=... node apps/api/dist/main.js
 
 # 6) 构建并部署 PWA(纯静态,任何静态托管均可)
-VITE_API_BASE=https://api.your.domain pnpm --filter @amr/web build
+VITE_API_BASE=https://api.your.domain bash infra/deploy.sh build
 ```
+
+## 4.1 Vercel:能托管什么,不能托管什么
+
+**结论:前端可以,API 不可以。**
+
+`apps/web` 是纯静态 Vite + PWA 产物,Vercel 是它的理想载体。仓库根已备好
+`vercel.json`(构建命令 `infra/vercel-build.sh`、产物目录 `apps/web/dist`、
+SPA 回退重写、`sw.js` 不缓存 / `assets/*` 永久缓存)。Vercel 项目设置里:
+
+- **Root Directory** = 仓库根(不是 `apps/web` —— web 依赖 workspace 包 `@amr/contracts`,
+  pnpm workspace 必须从根安装)
+- **Environment Variables**:`VITE_API_BASE=https://api.medireco.eckstein.pro`
+  ★ 这是**构建期**变量。Vercel 不区分构建期/运行期地让你配上,配错了不会报错,
+  只会把默认值静默烤进产物、上线后打到错误的后端。`infra/check-web-dist.sh`
+  正是为此在产物里回读这个字符串,读不到就让构建失败。
+- **绝不**配 `VITE_M1_TEST_HOOKS`。同一份自检会在产物里搜 `__amr`,搜到即拒绝发布。
+
+API(`apps/api`)**不要**上 Vercel,四条都是硬伤,不是调优问题:
+
+| 依赖 | 与 Vercel 函数模型的冲突 |
+|---|---|
+| `startWorker()` 的 `setInterval` 轮询(3s 取作业 / 60s 收僵尸) | 函数只在请求期间存活,响应一返回就冻结 —— 作业队列**永远不会被消费**,`ai_job` 只进不出 |
+| Stage-1 调 Claude,SDK 超时设 600s | 超过 Vercel 函数的最长执行时长;长图批次会被拦腰截断,重试也一样 |
+| `initSharp()` + 请求路径里现算派生物 | sharp 是原生模块,进程级全局;每次冷启动重新初始化,派生物生成会顶到超时 |
+| postgres.js 长连接 | 无服务器需要连接池代理,否则并发一上来就打爆 Postgres 连接数 |
+
+API 要的是**一个长活容器**。与本仓库现有部署脚本对齐的选择:任意 VPS + Docker
+(`infra/` 已有 compose),或 Fly.io / Railway / Render 这类跑常驻容器的平台。
+数据库另起托管 Postgres 16;对象存储已经是外部的 R2,不受影响。
+
+拆开托管后要记得两件事:
+
+1. API 侧 `WEB_ORIGIN` 必须包含 Vercel 给的域名(以及最终的 `medireco.eckstein.pro`)。
+   CORS 白名单不接受 `*` —— 带 `Authorization` 的跨源请求要求精确 origin。
+2. 前端到 API 是**跨源**的。Vercel 的 `rewrites` 代理能把 `/api/*` 转发到后端从而变成同源,
+   但那样每次上传/下载都多绕一跳 Vercel,而本项目的大对象走的是 R2 预签名直传、
+   本就不经过 API —— 绕这一跳没有收益。保持跨源 + 白名单即可。
 
 ## 5. 部署冒烟
 
