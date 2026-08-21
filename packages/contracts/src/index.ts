@@ -9,6 +9,9 @@ export * from './journal.js';
 export * from './errors.js';
 export * from './auth.js';
 export * from './ai.js';
+export * from './jobs.js';
+export * from './normalization.js';
+export * from './corrections.js';
 
 export const SCHEMA_VERSIONS = {
   capture: '2.0',

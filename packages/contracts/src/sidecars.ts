@@ -60,17 +60,48 @@ export const PageSidecar = z
   })
   .strict();
 
-export const CorrectionSidecar = z
+// m2-01 §6:扩为判别联合并升 1.1。page_move 承载 D7 的拆分/合并/移页 ——
+// 拆分与合并均分解为一组 page_move,不另立类型。
+const CorrectionBase = {
+  schema_version: z.literal('1.1'),
+  seq: z.number().int().min(1),
+  corrected_at: IsoDateTime,
+  client_operation_id: Uuid,     // 幂等由它承担,**不由 seq 承担**(审核 #004 C-5)
+};
+
+export const CorrectionPersonReassign = z
   .object({
-    schema_version: z.literal('1.0'),
-    seq: z.number().int().min(1),
+    ...CorrectionBase,
     kind: z.literal('person_reassign'),
     from_person_slug: PersonSlug,
     to_person_slug: PersonSlug,
     reason: z.string(),
-    corrected_at: IsoDateTime,
   })
   .strict();
+
+export const CorrectionPageMove = z
+  .object({
+    ...CorrectionBase,
+    kind: z.literal('page_move'),
+    from_doc_short_id: DocShortId,
+    to_doc_short_id: DocShortId,
+    // ★ 用内容摘要定位页,不用 key:key 中的 NN 是拍摄序且永不改名(ADR-047),
+    //   移页之后 key 与所属文档不再对应,只有摘要是稳定锚点。
+    page_sha256: Sha256Hex,
+    from_page_no: z.number().int().min(1),
+    to_page_no: z.number().int().min(1),
+  })
+  .strict();
+
+export const CorrectionSidecar = z.discriminatedUnion('kind', [
+  CorrectionPersonReassign, CorrectionPageMove,
+]);
+
+/** 全局重放排序键(m2-06 §3.1d)。seq 是**目录内**计数器,跨目录做次键无意义;
+ *  禁止改用 S3 的 LastModified(不确定、可被复制改变)。 */
+export function correctionSortKey(c: z.infer<typeof CorrectionSidecar>, fromDoc: string): string {
+  return `${c.corrected_at}|${fromDoc}|${String(c.seq).padStart(4, '0')}`;
+}
 
 export const ManifestAdd = z
   .object({
@@ -81,6 +112,9 @@ export const ManifestAdd = z
     person_slug: PersonSlug,
     prefix: z.string(),
     created_at: IsoDateTime,
+    // m2-01 §3.5:拆分产生的新文档也要有 add 行,但必须能与采集产生的区分开。
+    // 它共用源文档的物理前缀(D7 不动原件的直接后果),且自己写了一份 capture.json。
+    origin: z.enum(['capture', 'split']).default('capture'),
   })
   .strict();
 

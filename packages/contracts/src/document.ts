@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { Uuid, IsoDate, IsoDateTime, DocShortId, Sha256Hex } from './scalars.js';
-import { DocumentSource, DocumentStatus, DocType, MimeType } from './enums.js';
+import { DocumentSource, DocumentStatus, DocType, MimeType, PersonCheck } from './enums.js';
 import { canonicalJsonString } from './canonical.js';
 
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
@@ -89,6 +89,7 @@ export const DocumentPageOut = z.object({
   height: z.number().int(),
 });
 export const DocumentOut = z.object({
+  archived_at: IsoDateTime.nullable().default(null),
   id: Uuid,
   short_id: DocShortId,
   person_id: Uuid,
@@ -124,10 +125,20 @@ export function idempotencyFingerprint(input: z.infer<typeof DocumentCreate>): s
 }
 
 // ── M1:文档列表 ────────────────────────────────────────────────────────
+export const DateField = z.enum(['capture_date', 'sampled_on', 'reported_on']);
+
 export const DocumentListQuery = z.object({
   person_id: Uuid,
   from: IsoDate.optional(),
   to: IsoDate.optional(),
+  // m2-01 §3.2:from/to 的语义由固定 capture_date 改为按 date_field 选择(D15 清偿项)。
+  // ★ 边界规则(m2-99 A31):所选列为 NULL 的文档**一律不入选**,无论 from/to 如何。
+  date_field: DateField.default('capture_date'),
+  doc_type: DocType.optional(),
+  facility_id: Uuid.optional(),
+  person_check: PersonCheck.optional(),
+  acked: z.coerce.boolean().optional(),      // 与 person_check 组合:未 ack 的告警
+  include_archived: z.coerce.boolean().default(false),
   cursor: z.string().max(128).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
@@ -138,6 +149,15 @@ export const DocumentListItem = z.object({
   page_count: z.number().int(), doc_type: DocType, status: DocumentStatus,
   original_filename: z.string().nullable(),
   first_page: z.object({ page_no: z.number().int(), mime_type: MimeType }).nullable(),
+  // ── M2 增量 ──
+  doc_type_confidence: z.number().nullable(),
+  sampled_on: IsoDate.nullable(),
+  reported_on: IsoDate.nullable(),
+  facility_name: z.string().nullable(),
+  // ★ 两列都要下发:告警条件恒为 person_check='mismatch' AND person_check_ack_at IS NULL
+  person_check: PersonCheck,
+  person_check_ack_at: IsoDateTime.nullable(),
+  archived_at: IsoDateTime.nullable(),
 });
 
 export const DocumentListResponse = z.object({

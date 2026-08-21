@@ -4,8 +4,9 @@ import {
   text, timestamp, uniqueIndex, uuid,
 } from 'drizzle-orm/pg-core';
 import {
-  AccessRole, DocType, DocumentSource, DocumentStatus, EncounterType,
-  IdentifierScope, IdentifierType, RelationToOwner, SexAtBirth,
+  AccessRole, AiJobKind, AiJobState, DocType, DocumentSource, DocumentStatus, EncounterType,
+  GroupingBasis, IdentifierScope, IdentifierType, NormalizationKind, NormalizationState,
+  PersonCheck, RelationToOwner, SexAtBirth,
 } from '@amr/contracts';
 
 // spec m0-02。枚举 CHECK 的值列表由 contracts 生成 —— 单一来源(B2 由构造保证 + 集成断言)。
@@ -106,8 +107,15 @@ export const encounter = pgTable(
     diagnosisText: text('diagnosis_text').notNull().default(''),
     doctorAdvice: text('doctor_advice').notNull().default(''),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    /** ★ L1 人工层:归组判据强度(m2-05 §3)。可空 —— NULL 表示 M2 之前建的 encounter。
+     *  它记的是"这一组是靠时分还是靠相邻日判出来的",与 document.event_time_source
+     *  (该时刻取自哪个字段,docs/03 §226)是两件事,不能挤在一个列名里。 */
+    groupingBasis: text('grouping_basis'),
   },
-  (t) => [check('enc_type', inList('encounter_type', EncounterType.options))],
+  (t) => [
+    check('enc_type', inList('encounter_type', EncounterType.options)),
+    check('enc_grouping_basis', sql`grouping_basis is null or ${inList('grouping_basis', GroupingBasis.options)}`),
+  ],
 );
 
 export const document = pgTable(
@@ -148,6 +156,17 @@ export const document = pgTable(
     reportNotes: text('report_notes'),
     reportNotesSource: text('report_notes_source').notNull().default('report_original'),
     columnSet: jsonb('column_set'),
+    // ── M2(spec m2-01 §5)。层的标注不是注释,是规范性约束:
+    //    verify-rebuild 的字段表必须含全部 L1 人工层列、排除全部 L2 可重算列(m2-99 B13)。
+    departmentRaw: text('department_raw'),                                   // L2 可重算
+    personCheck: text('person_check').notNull().default('unknown'),          // L2 可重算
+    /** ★ L1 人工层:归人告警的 ack。**禁止**被任何重算写入或清除 —— 
+     *  原设计让 ack 置 person_check='skipped',而 S1 每次重跑都会覆盖那一列(审核 #004 A-5)。 */
+    personCheckAckAt: timestamp('person_check_ack_at', { withTimezone: true }),
+    /** ★ L1 人工层:软删除 */
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+    s1ArtifactKey: text('s1_artifact_key'),                                  // L2 可重算
+    s1PromptVersion: integer('s1_prompt_version'),                           // L2 可重算
     uploadedBy: uuid('uploaded_by').notNull().references(() => account.id),
     status: text('status').notNull(),
     clientDocumentId: text('client_document_id').notNull(),
@@ -158,6 +177,7 @@ export const document = pgTable(
     check('doc_source', inList('source', DocumentSource.options)),
     check('doc_status', inList('status', DocumentStatus.options)),
     check('doc_type_enum', inList('doc_type', DocType.options)),
+    check('doc_person_check', inList('person_check', PersonCheck.options)),
     uniqueIndex('uq_document_idempotency').on(t.uploadedBy, t.clientDocumentId),
     index('idx_document_person_captured').on(t.personId, t.capturedAt.desc(), t.id.desc()),
   ],
@@ -215,3 +235,61 @@ export const captureDiscardEvent = pgTable('capture_discard_event', {
   clientDocumentId: uuid('client_document_id').notNull(),
   recordedAt: timestamp('recorded_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+// ── M2:后台任务队列(spec m2-04 §2)。属 L2 —— 删库重建后为空,
+//    禁止因缺少 job 记录而使任何 L1 数据不可用。
+export const aiJob = pgTable(
+  'ai_job',
+  {
+    id: uuid('id').primaryKey(),
+    kind: text('kind').notNull(),
+    documentId: uuid('document_id').references(() => document.id),
+    /** 可空:facility_normalize 是**家庭级**作业,不属于任何一个 person(审核 #004 A-7) */
+    personId: uuid('person_id').references(() => person.id),
+    state: text('state').notNull().default('pending'),
+    attempt: integer('attempt').notNull().default(0),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+    lockedAt: timestamp('locked_at', { withTimezone: true }),
+    lockedBy: text('locked_by'),
+    lastError: jsonb('last_error'),
+    resultKey: text('result_key'),
+    /** 去重键。构造规则的单一出处是 contracts 的 dedupKey ——
+     *  散落在调用点会导致某一处静默写错,而写错的表现是"作业莫名其妙只出现过一次"。 */
+    dedupKey: text('dedup_key').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check('aj_kind', inList('kind', AiJobKind.options)),
+    check('aj_state', inList('state', AiJobState.options)),
+    check('aj_person', sql`kind <> 'stage1' or person_id is not null`),
+    uniqueIndex('uq_ai_job_dedup').on(t.dedupKey),
+    index('idx_ai_job_ready').on(t.state, t.nextAttemptAt),
+  ],
+);
+
+// ── M2:归一化决策(spec m2-05 §2,ADR-040)。
+//    confirmed 行属 L1 人工层(可从 _index/decisions/ 回放);proposed 行属 L2。
+export const normalizationDecision = pgTable(
+  'normalization_decision',
+  {
+    id: uuid('id').primaryKey(),
+    kind: text('kind').notNull(),
+    /** 同输入指纹 → 同决策,确定性重放(ADR-040) */
+    inputFingerprint: text('input_fingerprint').notNull(),
+    proposal: jsonb('proposal').notNull(),
+    state: text('state').notNull().default('proposed'),
+    decidedBy: uuid('decided_by').references(() => account.id),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    promptId: text('prompt_id'),
+    promptVersion: integer('prompt_version'),
+    model: text('model'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check('nd_kind', inList('kind', NormalizationKind.options)),
+    check('nd_state', inList('state', NormalizationState.options)),
+    uniqueIndex('uq_normalization_fingerprint').on(t.inputFingerprint),
+  ],
+);
+

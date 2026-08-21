@@ -71,15 +71,28 @@ const bareFiltered = bare.filter((l) => !l.includes('define-route.ts'));
 if (bareFiltered.length) failures.push(`裸路由注册:\n${bareFiltered.join('\n')}`);
 
 // B2: 迁移 SQL 的 CHECK 值列表 == contracts 枚举(单一来源断言)
-const migrationSql = readFileSync(path.join(root, 'apps/api/drizzle/0000_init.sql'), 'utf-8');
+// ★ 必须读**全部**迁移文件:只读 0000 的话,后续里程碑新增的枚举永远查不到对应 CHECK,
+//   而这条断言的价值恰恰在于"加了枚举却忘了迁移"时变红(M2 实现期实证)。
+const drizzleDirForB2 = path.join(root, 'apps/api/drizzle');
+const migrationSql = readdirSync(drizzleDirForB2)
+  .filter((f) => f.endsWith('.sql'))
+  .sort()
+  .map((f) => readFileSync(path.join(drizzleDirForB2, f), 'utf-8'))
+  .join('\n');
 const enumsTs = readFileSync(path.join(root, 'packages/contracts/src/enums.ts'), 'utf-8');
 const expectChecks: Array<[string, string[]]> = [];
 for (const m of enumsTs.matchAll(/export const (\w+) = z\.enum\(\[([\s\S]*?)\]\)/g)) {
   const values = [...m[2]!.matchAll(/'([^']+)'/g)].map((x) => x[1]!);
   expectChecks.push([m[1]!, values]);
 }
+// 不落 DB 列的枚举:它们只出现在 JSON 载荷或查询参数里,没有对应 CHECK 是正确的。
+const NON_DB_ENUMS = new Set([
+  'MimeType',   // 只在 sidecar 与请求体内
+  'PiiKind',    // S1 工件的 JSON 内部
+  'DateField',  // 列表查询参数
+]);
 for (const [name, values] of expectChecks) {
-  if (name === 'MimeType') continue; // MimeType 不进 DB CHECK
+  if (NON_DB_ENUMS.has(name)) continue;
   const inList = values.map((v) => `'${v}'`).join(', ');
   if (!migrationSql.includes(inList)) failures.push(`B2: 迁移 CHECK 与 contracts.${name} 不一致(期望 in (${inList}))`);
 }

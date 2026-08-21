@@ -127,6 +127,28 @@ describe('derived key(M1 · m1-03 §1;m0/CHANGES #7)', () => {
       expect(parseKey(m)).toEqual({ kind: 'derivedMeta', personSlug, docShortId });
     }
   });
+  it('extraction key 往返(m2-03 §4)', () => {
+    const k = buildKey.extraction({ personSlug: 'p3f7a2', docShortId: 'd7k2m9', stage: 's1', promptVersion: 3 });
+    expect(k).toBe('derived/p3f7a2/d7k2m9/extractions/s1-v003.json');
+    expect(parseKey(k)).toEqual({
+      kind: 'extraction', personSlug: 'p3f7a2', docShortId: 'd7k2m9', stage: 's1', promptVersion: 3,
+    });
+  });
+
+  it('★ extraction key 不含 @ —— 那不在 M0 冻结的字节集内(审核 #004 A-3)', () => {
+    const k = buildKey.extraction({ personSlug: 'p3f7a2', docShortId: 'd7k2m9', stage: 's1', promptVersion: 1 });
+    expect(k).not.toContain('@');
+    expect(() => parseKey('derived/p3f7a2/d7k2m9/extractions/s1@1.json')).toThrow();
+  });
+
+  it('_meta 有匹配器,且大写字母只在 _meta 下放行(A30 的前置条件)', () => {
+    expect(parseKey('_meta/README.md')).toEqual({ kind: 'meta', path: 'README.md' });
+    expect(parseKey('_meta/schemas/capture-2.0.json')).toEqual({ kind: 'meta', path: 'schemas/capture-2.0.json' });
+    // 字节集不变式对数据 key 仍然严格 —— 放行的只是手写的自述层
+    expect(() => parseKey('people/P3F7A2/_person.json')).toThrow();
+    expect(() => parseKey('_meta/../people/x')).toThrow();
+  });
+
   it('非法 derived key 抛错', () => {
     expect(() => parseKey('derived/p3f7a2/d7k2m9/thumb-1.webp')).toThrow();
     expect(() => parseKey('derived/p3f7a2/d7k2m9/thumb-01.jpg')).toThrow();

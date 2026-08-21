@@ -25,3 +25,9 @@ export const MIME_TO_EXT = {
   'image/webp': 'webp',
   'application/pdf': 'pdf',
 } as const satisfies Record<z.infer<typeof MimeType>, string>;
+
+// m2-01 §2:归人对账的比对结果。**没有 skipped** —— 人工 ack 写的是
+// document.person_check_ack_at(L1),不是这一列(L2,每次 S1 重跑都会被覆盖)。
+// 一列同时承载模型与人的判断,重跑时模型会赢(审核 #004 A-5)。
+export const PersonCheck = z.enum(['match', 'mismatch', 'unknown']);
+
