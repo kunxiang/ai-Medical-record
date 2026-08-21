@@ -77,6 +77,21 @@ R2 的实测结论见 ADR-048:条件写完整可用;预签名 PUT 带 sha256 校
 
 ## 4. 首次部署
 
+一键脚本(等价于下面的分步):
+
+```bash
+VITE_API_BASE=https://api.your.domain \
+DATABASE_URL=... S3_ENDPOINT=... S3_BUCKET=... \
+S3_ADMIN_KEY=... S3_ADMIN_SECRET=... WEB_ORIGIN=https://your.domain \
+  infra/deploy.sh all
+```
+
+`deploy.sh build` 带两道**兜底自检**,不依赖"我记得没设那个变量":
+产物含 `__amr` 注入面 → 拒绝发布;产物中找不到 `VITE_API_BASE` 的值 → 拒绝发布
+(构建期变量没生效的话,PWA 会静默打到错误的后端)。两道都做过故障注入验证。
+
+分步:
+
 ```bash
 # 1) 构建
 pnpm install --frozen-lockfile
