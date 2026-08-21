@@ -14,7 +14,8 @@
 | 4 | 后台任务队列 + 状态查询 + 降级 | [04-jobs.md](./04-jobs.md) |
 | 5 | 归人对账 / facility 归一 / encounter 归组建议 | [05-reconciliation.md](./05-reconciliation.md) |
 | 6 | 事后纠正:软删除、归人纠正、文档拆分、分片续传 | [06-corrections.md](./06-corrections.md) |
-| 7 | 验收 | [99-acceptance.md](./99-acceptance.md) |
+| 7 | **人工层回放(D16 最小切片)** | [07-replay.md](./07-replay.md) |
+| 8 | 验收 | [99-acceptance.md](./99-acceptance.md) |
 
 ## 2. 明确不做(M2 边界)
 
@@ -35,6 +36,7 @@
 | **D14** 分片 + 断点续传 | M2 | 预签名 multipart 三段式。见 [06](./06-corrections.md) §4 |
 | **D15** M1 期错档的事后纠正 | M2 | 归人纠正(`correction-NNNN.json`)+ 连拍分组纠正 + `from/to` 语义迁移。见 [06](./06-corrections.md) §2 |
 | **软删除**(M1 审核 #002 S1 移交) | M2 | `archived_at` + journal `document_archive` 事件 + D11 审计的文档删除部分。见 [06](./06-corrections.md) §1 |
+| **D16** journal 回放能力 | ~~M3~~ → **M2**(审核 #004 A-1/A-14 上调) | 最小切片:`document_archive` / `person_check_ack` / `normalization_confirm` 三个事件的 DB 落点回放。见 [07](./07-replay.md)。**上调理由**:D16 绑 M3 的依据是"M3 的问答答案是第一个必须回放的人工层事件",而 M2 新增了四类必须回放的人工判断 —— 依据不成立了 |
 
 ## 4. 承接既有约束(不得重新讨论)
 
@@ -55,10 +57,13 @@
 | 1 | 模型输入由"原件预签名 URL"改为 `ai-NN.webp` 派生物 | **ADR-050(新)** + docs/06 §2 ✅已回写 |
 | 2 | docs/06 §2 称最小可缓存前缀 512 token,实为约 1024 | docs/06 §2 ✅已回写 |
 | 3 | PDF 页走 `document` 块而非 `image` 块(06 未区分) | docs/06 §2 ✅已回写 |
-| 4 | 新增 `refusal` 的服务端 fallback 机制(06 未涉及) | docs/06 §5 + [02](./02-ai-client.md) §5 |
+| 4 | ~~新增 refusal 的 fallback 机制(06 未涉及)~~ **这条是错的**:docs/06 **§9** 早已完整写了 refusal 判断与 `fallbacks: 'default'`,而 §5 是归一化与校验、与此无关。spec 只是把"建议"升格为"必须"并补了终态处置 | 无需回写(审核 #004 C-1) |
 | 5 | 新增派生物变体 `ai` | docs/04 §1 矩阵 + §6 |
 | 6 | 新增 journal 事件 4 个(见 [01](./01-contracts-delta.md) §4) | docs/04 §3 + `_meta` 三处 |
 | 7 | `from/to` 筛选语义由 `capture_date` 迁到 `date_field` 可选 | docs/07 §3 |
+| 8 | S1 工件命名 `extractions/s1-v{NNN}.json`,**不带轮次维度**(M2 禁止闭环重读,故无 `-rN`) | docs/04 §2(说明与 M5 的 `vNNN-rN` 的关系)(审核 #004 C-2) |
+| 9 | **ADR-049(一事件一对象)暂缓,M2 沿用 M0 的读-改-写追加语义** | docs/adr.md ADR-049 状态栏已标注;[99](./99-acceptance.md) A28b 据此写(审核 #004 A-3) |
+| 10 | 32000 tokens 的重试路径改用流式(`stream()` + `finalMessage()`) | docs/06 §9 本就如此,spec 原版写成非流式是偏差(审核 #004 A-8) |
 
 ## 6. M2 的验收哲学
 

@@ -13,7 +13,7 @@ CREATE TABLE ai_job (
   id                uuid PRIMARY KEY,
   kind              text NOT NULL,          -- 'stage1' | 'facility_normalize' | 'encounter_suggest'
   document_id       uuid REFERENCES document(id),
-  person_id         uuid NOT NULL REFERENCES person(id),
+  person_id         uuid REFERENCES person(id),   -- ★ 可空:facility_normalize 是家庭级作业(审核 #004 A-7)
   state             text NOT NULL,          -- 见 §3
   attempt           integer NOT NULL DEFAULT 0,
   next_attempt_at   timestamptz NOT NULL DEFAULT now(),
@@ -25,7 +25,8 @@ CREATE TABLE ai_job (
   created_at        timestamptz NOT NULL DEFAULT now(),
   updated_at        timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT aj_kind  CHECK (kind IN ('stage1','facility_normalize','encounter_suggest')),
-  CONSTRAINT aj_state CHECK (state IN ('pending','running','done','failed','needs_human','unsupported'))
+  CONSTRAINT aj_state CHECK (state IN ('pending','running','done','failed','needs_human','unsupported')),
+  CONSTRAINT aj_person CHECK (kind <> 'stage1' OR person_id IS NOT NULL)
 );
 CREATE UNIQUE INDEX uq_ai_job_dedup ON ai_job (dedup_key);
 CREATE INDEX idx_ai_job_ready ON ai_job (state, next_attempt_at) WHERE state = 'pending';
@@ -33,11 +34,22 @@ CREATE INDEX idx_ai_job_ready ON ai_job (state, next_attempt_at) WHERE state = '
 
 1. `dedup_key` 的构造(审核 #003 A5):
 
-| kind | `dedup_key` |
-|---|---|
-| `stage1` | `'stage1:' || document_id` |
-| `facility_normalize` | `'facility:' || input_fingerprint` |
-| `encounter_suggest` | `'encounter:' || person_id || ':' || to_char(event_time, 'YYYY-MM-DD')` |
+| kind | `dedup_key` | 冲突处置 |
+|---|---|---|
+| `stage1` | `'stage1:' \|\| document_id` | `DO NOTHING` |
+| `facility_normalize` | `'facility:' \|\| input_fingerprint` | `DO NOTHING` |
+| `encounter_suggest` | `'encounter:' \|\| person_id` | **`DO UPDATE` 刷新 `next_attempt_at`** |
+
+> **两处必须说明,否则会静默失效:**
+>
+> ① 原版 `encounter_suggest` 的去重键含 `to_char(event_time,'YYYY-MM-DD')`。`event_time` 在 `document` 上是
+> **M0 就已存在且恒 NULL 的真实列** —— SQL 不会报错,只会永远取到 NULL,于是每个 person 的所有归组作业
+> `dedup_key` 都退化成 `'encounter:<pid>:'`,把这个人**一生的归组作业压成一行**,`DO NOTHING` 静默吞掉其余。
+> 表现是"归组建议莫名其妙只出现过一次"(审核 #004 A-5′)。
+>
+> ② 原版按日历日切分归组作业,与 [05](./05-reconciliation.md) §3「禁止按日历日」**当场自相矛盾**:
+> A19 的用例(23:50 与次日 00:30)天然落在两个日历日,哪条作业负责评估这一对?候选集是什么?
+> 改为 **person 级合并型作业**后,一次作业的候选集 = 该 person 全部未归组文档,与归组判据同源(审核 #004 A-6)。
 
    > 早先的 `UNIQUE (document_id, kind) WHERE document_id IS NOT NULL` 是错的:`encounter_suggest` 是跨文档作业、`document_id` 为 null,**完全不受该索引约束**,重复投递会无限累积。
    `uq_ai_job_dedup` **必须**存在。重复投递 **必须** `ON CONFLICT DO NOTHING`,**禁止**产生第二条。
@@ -81,6 +93,9 @@ CREATE INDEX idx_ai_job_ready ON ai_job (state, next_attempt_at) WHERE state = '
 1. 三个端点 **必须**经 `defineRoute` 注册并通过 `requireDocumentAccess` / `requirePersonAccess`(m0 既有中间件)。越权 **必须**返回 404,且与"不存在"不可区分。
 2. `rerun` **必须**:①把既有 job 置回 `pending`、`attempt=0`;②**不删除**旧工件(不同 `prompt_version` 并存,同版本则先删后写)。
 3. `rerun` **禁止**跨人批量执行。一次调用只作用于一个文档。批量补跑由 `tools/` 侧脚本负责,不开放为 API。
+3b. **家庭级作业的可见性**:`facility_normalize` 的 `person_id` 为 NULL,`requirePersonAccess` 无从施加。
+   `GET /jobs` 对该类作业的规则是:**对该账号有 editor 权限的任一 person 存在时可见**;其载荷**禁止**包含任何
+   person 或 document 标识(它只含机构名与指纹)。
 4. `GET /documents/:id/ai` 的响应 **禁止**包含 `full_text`(避免 PII 经 API 外泄);只返回 `doc_type`、置信度、日期、机构原文、`summary`、job 状态与工件 key。
 
 ## 6. 可观测性

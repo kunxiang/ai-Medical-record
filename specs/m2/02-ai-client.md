@@ -7,7 +7,11 @@
 - **必须**使用官方 SDK `@anthropic-ai/sdk`,**禁止**手写 HTTP 调用。
 - 模型 **必须** 为字符串常量 `claude-opus-5`,定义于 `packages/ai/src/models.ts` 单一出处。**禁止**在调用点内联模型名,**禁止**追加日期后缀。
 - 凭证 **必须** 由 SDK 从环境解析(零参构造 `new Anthropic()`);**禁止**在代码中硬编码 key,**禁止**把 key 写进任何落桶对象。
-- 客户端超时 **应当** 显式设为 600000(TypeScript SDK 单位为**毫秒**);重试次数保持 SDK 默认 2。
+- 客户端超时 **必须** 显式设为 600000(TypeScript SDK 单位为**毫秒**);重试次数保持 SDK 默认 2。
+  > ⚠️ **显式 timeout 会关闭 SDK 的非流式长请求守卫**(审核 #004 A-8)。SDK 在**没有**显式 timeout 时会按
+  > `expectedTime = 3_600_000 × max_tokens / 128_000` 估算,超过 600 秒即抛错要求改用流式(阈值约 `max_tokens > 21333`)。
+  > 设了显式 timeout 之后这道保护就没了 —— 因此 **`max_tokens` 的上限改由本 spec 自行约束**:
+  > 非流式路径 `max_tokens` **禁止**超过 **21000**;超过必须走流式(见 §5.4)。
 
 ## 2. 请求形状(S1)
 
@@ -38,7 +42,7 @@ const parsed = Stage1Out.parse(JSON.parse(textOf(res.content)));
    > 代价是放弃 `parsed_output` 的类型便利。这个代价换的是验收资产的可信度,值。
 2. **禁止**传 `thinking` 的 `budget_tokens`(Opus 5 上返回 400)。**禁止**显式 `{type:'disabled'}`。省略 `thinking` 即为 adaptive,这是本项目要的行为。
 3. `output_config.effort` **必须**为 `'medium'`。理由:S1 是抄写与分类任务,不是推理任务;更高档位只增加成本与延迟。
-4. `max_tokens` **必须** ≥ 16000(`full_text` 可能很长);若单页 `stop_reason === 'max_tokens'`,按 [04](./04-jobs.md) §4 记为可重试失败并以 32000 重试一次。
+4. `max_tokens` **必须**为 16000(`full_text` 可能很长,但不得超过 §1 定的 21000 非流式上限)。`stop_reason === 'max_tokens'` 时的提额重试见 §5.4 —— **该重试必须走流式**。
 5. **禁止**使用 assistant 预填(Opus 5 上返回 400)。
 
 ## 3. 图像块的构造(ADR-050)
@@ -74,12 +78,14 @@ const parsed = Stage1Out.parse(JSON.parse(textOf(res.content)));
 |---|---|
 | `RateLimitError`(429) | 可重试,全抖动退避,最大 5 次 |
 | `APIConnectionError` / 5xx | 可重试,同上 |
-| `stop_reason === 'max_tokens'` | 以 `max_tokens: 32000` 重试一次;再失败 → `needs_human` |
+| `stop_reason === 'max_tokens'` | **以流式** `client.beta.messages.stream(...)` + `.finalMessage()`、`max_tokens: 32000` 重试一次;再失败 → `needs_human`。**禁止**非流式重试 —— 32000 tokens 的预期生成时间约 900 秒,而客户端 600 秒就 abort,SDK 会再自动重试两次同样注定超时的调用(每次都产生已计费输出),最终终态退化为 `failed` 而非本表承诺的 `needs_human`(审核 #004 A-8) |
+| S3 `PreconditionFailed`(412:同 `prompt_version` 的工件已存在) | **读取既有工件、跳过模型调用、直接落库**。成因是"PUT 工件成功但 DB commit 前进程崩溃"后的重跑;工件其实是好的,重新调模型纯属浪费(审核 #004 B-12) |
 | `stop_reason === 'refusal'` | **终态** `needs_human`,不重试 |
 | `BadRequestError`(400) | **终态** `failed`,不重试(请求形状错误,重试不会自愈) |
 | 输出未通过 Zod 校验 | 重试一次;再失败 → `needs_human` |
 
 5. **禁止**任何"失败就静默跳过"的路径。每个终态**必须**在 `ai_job` 表留下可查询的原因。
+6. **两处"重试一次"必须在同一次取件内同步完成,不经过 `pending`**(审核 #004 B-8)。否则 worker 每次取件都认为"这是第一次",永远走不到 `needs_human`,而是烧满 5 个 attempt 后判 `failed` —— `ai_job` 表里没有任何字段能承载"这是第二次"(`attempt` 同时被退避与僵尸回收使用)。
 
 ## 6. 成本与批处理
 

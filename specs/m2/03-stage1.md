@@ -50,6 +50,11 @@ export const Stage1Out = z.object({
 3. 日期 **必须**为 `YYYY-MM-DD`;解析失败 **必须**置 `null`,**禁止**猜测。
 4. `full_text` **必须**逐页产出,**禁止**跨页拼接为单一字符串 —— 跨页拼接会让 D7 的边界建议与页级重跑失去落点。
 5. `pii_spans` 的 `start`/`end` **必须**是**该页 `full_text` 的字符偏移**(UTF-16 码元),半开区间 `[start, end)`。
+6. **PDF 的 `page_no` 是 PDF 内部页序,与 `document_page.page_no` 不同源**(审核 #004 A-13)。
+   一份 5 页 PDF 在 L1 与 DB 里是**一个** `document_page` 行(m0-03 §2:1 个 PDF = 1 个 page 对象),而模型会返回 5 个 `Stage1Page`。
+   - M2 **禁止**为 PDF 建 `document_page` 展开行 —— 页级定位是 D5/M4 的事。
+   - §5 的"同 `page_no` 出现两次即失败"其作用域是**同一 `document_page` 内的 PDF 内页序**,不是跨 `document_page`。
+   - §2 要求的"页号已给出、直接采用"只适用于 image 块;PDF 走 `document` 块,**由模型自行按 PDF 内部页序编号**。
 
 ## 2. Prompt 的硬性要求
 
@@ -79,7 +84,17 @@ export const Stage1Out = z.object({
 
 ## 4. S1 工件落桶
 
-key:`derived/{slug}/{short_id}/extractions/s1@{prompt_version}.json`
+key:`derived/{slug}/{short_id}/extractions/s1-v{NNN}.json`(`NNN` = `prompt_version`,三位零填充)
+
+> 原版写 `s1@{prompt_version}.json` —— **`@` 不在 M0 冻结的 key 字节集** `[a-z0-9._/-]` 内,
+> 走 `buildKey` 会直接抛"key 含非法字符",绕过 `buildKey` 手拼则 A30 红且开了"key 不走单一出处"的口子(审核 #004 A-3)。
+> `packages/ai/prompts/{stage}/{id}@{version}.md` 是**本地文件路径**,不受此约束,无需改。
+>
+> `{slug}` **恒取权威归属 slug**(manifests 回放的结果),不是拍摄时刻的 slug(审核 #004 B-6)。
+> 归人纠正时**必须**把 `document.s1_artifact_key` 置 null,强制下次按新前缀重生 —— 否则重建时按权威 slug 查找会对
+> **所有被纠正过的文档**静默落空,表现为"被纠正过的文档在重建后系统性地更差",且没有任何信号。
+
+**必须**在 `packages/storage` 登记:`ParsedKey` 新增 `extraction` 变体、`buildKey.extraction`、`MATCHERS` 新增 extraction 与 `_meta` 两条匹配器(后者是 A30 把 `derived/` 纳入扫描的前置条件)。
 属 **L2**:不上锁、可整体删除、可重跑、打包不带、备份不带。**必须**在 docs/04 §1 权威矩阵登记。
 
 工件内容 **必须**包含:
@@ -126,10 +141,13 @@ S1 完成后 **必须**在同一 DB 事务内更新 `document`:
 | `doc_type_confidence` | 同名 | 新列 |
 | `sampled_on` / `reported_on` | 同名 | 新列,可空 |
 | `department_raw` | 同名 | 新列,可空 |
+| `event_time` | `Stage1Out.event_at` | **复用 M0 既有列**(审核 #004 A-5′)。报告确实印有时分时才写,否则留 NULL |
+| `event_time_source` | 取值按 `docs/03 §226` | 与 `event_time` 同批写;`event_time` 为 NULL 时本列也必须为 NULL |
 | `facility_id` | **不在此处写** | 由 [05](./05-reconciliation.md) §2 归一后写 |
 | `s1_artifact_key` | 工件 key | 新列;为空表示未跑过 S1 |
 | `s1_prompt_version` | 同名 | 新列 |
 
 1. **禁止**在此写 `person_id` —— 归人是人的决定,S1 只能产生告警([05](./05-reconciliation.md) §1)。
 2. **禁止**把 `full_text` 写进数据库(M2 不建索引;写进去就等于建了一个没人管的 PII 副本)。
-3. `document` 的这些列均可从 S1 工件重算 ⇒ 属 L2 语义。`rebuild-index` **必须**在工件存在时重放这些列,工件不存在时留空 —— **禁止**因缺工件而使重建失败。
+3. `document` 的这些列均可从 S1 工件重算 ⇒ 属 L2 语义。**`rebuild-index` 禁止读取 S1 工件**(审核 #004 B-7):按 `docs/04 §7` 的恢复剧本,冷备里**根本没有 `derived/`**,这段代码在真实恢复时 100% 走不到 —— 于是演练(桶完好)与真实恢复(桶只有 L1)结果不同,而"没演练过的备份等于没有备份"这套逻辑正建立在**演练能代表真实恢复**之上。
+   L2 列的恢复由 [04](./04-jobs.md) §2.2 既有的"为缺 `s1_artifact_key` 的文档重新投递 `stage1`"承担。若要省重跑成本,**可以**另做 `tools/` 下的独立 L2 补水脚本,**禁止**塞进 rebuild。
