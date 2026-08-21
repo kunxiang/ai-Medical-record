@@ -6,6 +6,8 @@ function req(name: string): string {
 
 export const env = {
   databaseUrl: process.env.DATABASE_URL ?? 'postgres://amr:amr@localhost:5433/amr',
+  /** m2-04 §3.5:作业并发度,必须 ≥1 */
+  aiJobConcurrency: Number(process.env.AI_JOB_CONCURRENCY ?? '2'),
   s3: {
     endpoint: process.env.S3_ENDPOINT ?? 'http://localhost:9100',
     region: process.env.S3_REGION ?? 'us-east-1',

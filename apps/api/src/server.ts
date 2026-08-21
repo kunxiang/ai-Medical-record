@@ -3,6 +3,8 @@ import cors from '@fastify/cors';
 import { ApiError } from './errors.js';
 import { env } from './env.js';
 import { initSharp } from './derivatives.js';
+import { startWorker } from './jobs/worker.js';
+import { registerAiRoutes } from './routes/ai.js';
 import { registerBrowseRoutes } from './routes/browse.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerPeopleRoutes } from './routes/people.js';
@@ -13,6 +15,11 @@ export function buildServer(): FastifyInstance {
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'warn' } });
 
   initSharp();   // 进程级全局,启动时设一次(m1-03 §2)
+  // AI 作业轮询器(m2-04 §3)。AI_JOB_WORKER=0 可关闭 —— 验收时用 tickOnce 同步驱动,
+  // 免得后台轮询与断言竞态。
+  if (process.env.AI_JOB_WORKER !== '0') {
+    startWorker(process.env.INSTANCE_ID ?? `api-${process.pid}`);
+  }
 
   // CORS(m1-02 §7.1):白名单来自 env,禁止 *,不用 cookie
   void app.register(cors, {
@@ -54,5 +61,6 @@ export function buildServer(): FastifyInstance {
   registerPeopleRoutes(app);
   registerDocumentRoutes(app);
   registerBrowseRoutes(app);
+  registerAiRoutes(app);
   return app;
 }

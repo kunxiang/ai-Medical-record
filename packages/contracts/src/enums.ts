@@ -30,4 +30,4 @@ export const MIME_TO_EXT = {
 // document.person_check_ack_at(L1),不是这一列(L2,每次 S1 重跑都会被覆盖)。
 // 一列同时承载模型与人的判断,重跑时模型会赢(审核 #004 A-5)。
 export const PersonCheck = z.enum(['match', 'mismatch', 'unknown']);
-
+export type PersonCheckT = import('zod').infer<typeof PersonCheck>;

@@ -17,6 +17,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@amr/ai':
+        specifier: workspace:*
+        version: link:../../packages/ai
       '@amr/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts

@@ -4,7 +4,7 @@ import { z } from 'zod';
 import {
   CaptureSidecar, DocumentCreate, DocumentOut, MAX_UPLOAD_BYTES, MIME_TO_EXT,
   PageSidecar, PageUrlResponse, PresignRequest, PresignResponse, Uuid,
-  capturedAtInRange, idempotencyFingerprint,
+  capturedAtInRange, dedupKey, idempotencyFingerprint,
 } from '@amr/contracts';
 
 type Mime = keyof typeof MIME_TO_EXT;
@@ -17,6 +17,7 @@ import {
   account, document, documentPage, person, uploadBatch, uploadFile,
 } from '../db/schema.js';
 import { defineRoute } from '../define-route.js';
+import { enqueue } from '../jobs/queue.js';
 import { ApiError, notFound } from '../errors.js';
 import { appendManifest } from '../journal.js';
 import { newId } from '../person-service.js';
@@ -258,6 +259,9 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
           // 指纹的每个输入都在 capture.json 里 ⇒ 删库重建可原样重算(rebuild-index)。
           columnSet: { idem_fingerprint: fingerprint },
         });
+        // ★ 与登记**同事务**投递 S1 作业(m2-04 §4.1):
+        //   分开事务的话,"文档已登记但作业没投递"会静默漏跑,而这种漏跑没有任何信号。
+        await enqueue(tx, { kind: 'stage1', dedupKey: dedupKey.stage1(documentId), documentId, personId: input.person_id });
         await tx.insert(documentPage).values(
           staged.map((s) => ({
             id: newId(), documentId, pageNo: s.pageNo, storageKey: s.finalKey,

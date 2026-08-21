@@ -2,5 +2,6 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "outDir": "dist", "rootDir": "src", "composite": false, "declaration": false },
   "include": ["src"],
-  "references": [{ "path": "../../packages/contracts" }, { "path": "../../packages/storage" }]
+  "references": [{ "path": "../../packages/contracts" },
+    { "path": "../../packages/ai" }, { "path": "../../packages/storage" }]
 }
