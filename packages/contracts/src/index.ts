@@ -8,6 +8,7 @@ export * from './sidecars.js';
 export * from './journal.js';
 export * from './errors.js';
 export * from './auth.js';
+export * from './ai.js';
 
 export const SCHEMA_VERSIONS = {
   capture: '2.0',
