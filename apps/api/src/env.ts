@@ -10,7 +10,11 @@ export const env = {
   aiJobConcurrency: Number(process.env.AI_JOB_CONCURRENCY ?? '2'),
   s3: {
     endpoint: process.env.S3_ENDPOINT ?? 'http://localhost:9100',
-    region: process.env.S3_REGION ?? 'us-east-1',
+    // R2 要求 region='auto';MinIO/S3 用 us-east-1。签名区域不匹配直接 SignatureDoesNotMatch,
+    // 而错误信息完全不提区域 —— 值得自动推断而不是让人踩一次。
+    region:
+      process.env.S3_REGION ??
+      ((process.env.S3_ENDPOINT ?? '').includes('r2.cloudflarestorage.com') ? 'auto' : 'us-east-1'),
     bucket: process.env.S3_BUCKET ?? 'medical-record',
     accessKeyId: process.env.S3_ACCESS_KEY ?? 'amr-app',
     secretAccessKey: process.env.S3_SECRET_KEY ?? 'amr-app-secret',

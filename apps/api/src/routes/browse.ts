@@ -8,7 +8,7 @@ import {
 import { serverTimestamp } from '@amr/storage';
 import { requireDocumentAccess, requirePersonAccess } from '../access.js';
 import { db } from '../db/client.js';
-import { captureDiscardEvent, document, documentPage, person } from '../db/schema.js';
+import { captureDiscardEvent, document, documentPage, facility, person } from '../db/schema.js';
 import { defineRoute } from '../define-route.js';
 import { ApiError, notFound } from '../errors.js';
 import { ensureDerivative, type Variant } from '../derivatives.js';
@@ -27,8 +27,27 @@ export function registerBrowseRoutes(app: FastifyInstance): void {
       await requirePersonAccess(accountId, input.person_id, 'viewer');
 
       const conds = [eq(document.personId, input.person_id)];
-      if (input.from) conds.push(gte(document.captureDate, input.from));
-      if (input.to) conds.push(lte(document.captureDate, input.to));
+
+      // m2-01 §3.2:from/to 按 date_field 选择列。
+      // ★ A31 的边界:所选列为 NULL 的文档**一律不入选**,无论 from/to 如何 ——
+      //   否则"按采样日筛选"会把一堆还没跑过 S1 的文档也带出来,而它们的采样日根本未知。
+      const dateCol =
+        input.date_field === 'sampled_on' ? document.sampledOn
+        : input.date_field === 'reported_on' ? document.reportedOn
+        : document.captureDate;
+      if (input.date_field !== 'capture_date' && (input.from || input.to)) {
+        conds.push(sql`${dateCol} is not null`);
+      }
+      if (input.from) conds.push(gte(dateCol, input.from));
+      if (input.to) conds.push(lte(dateCol, input.to));
+
+      if (input.doc_type) conds.push(eq(document.docType, input.doc_type));
+      if (input.facility_id) conds.push(eq(document.facilityId, input.facility_id));
+      if (input.person_check) conds.push(eq(document.personCheck, input.person_check));
+      if (input.acked === false) conds.push(sql`${document.personCheckAckAt} is null`);
+      if (input.acked === true) conds.push(sql`${document.personCheckAckAt} is not null`);
+      // 软删除默认过滤(m2-06 §1.3)
+      if (!input.include_archived) conds.push(sql`${document.archivedAt} is null`);
       if (input.cursor) {
         let c: { capturedAt: string; documentId: string };
         try {
@@ -64,6 +83,15 @@ export function registerBrowseRoutes(app: FastifyInstance): void {
         : [];
       const fpByDoc = new Map(firstPages.map((f) => [f.documentId, f]));
 
+      // 机构名:归一后才有,未归一时为 null
+      const facilityIds = [...new Set(page.map((d) => d.facilityId).filter((x): x is string => !!x))];
+      const facilities = facilityIds.length
+        ? await db.select({ id: facility.id, name: facility.name })
+            .from(facility)
+            .where(sql`${facility.id} in ${sql.raw(`(${facilityIds.map((f) => `'${f}'`).join(',')})`)}`)
+        : [];
+      const facilityById = new Map(facilities.map((f) => [f.id, f.name]));
+
       const last = page[page.length - 1];
       return {
         documents: page.map((d) => {
@@ -74,6 +102,14 @@ export function registerBrowseRoutes(app: FastifyInstance): void {
             page_count: d.pageCount, doc_type: d.docType, status: d.status,
             original_filename: d.originalFilename,
             first_page: fp ? { page_no: fp.pageNo, mime_type: fp.mimeType } : null,
+            // ── M2 增量 ──
+            doc_type_confidence: d.docTypeConfidence === null ? null : Number(d.docTypeConfidence),
+            sampled_on: d.sampledOn, reported_on: d.reportedOn,
+            facility_name: d.facilityId ? facilityById.get(d.facilityId) ?? null : null,
+            // ★ 两列都下发:告警条件恒为 person_check='mismatch' AND person_check_ack_at IS NULL
+            person_check: d.personCheck as never,
+            person_check_ack_at: d.personCheckAckAt?.toISOString() ?? null,
+            archived_at: d.archivedAt?.toISOString() ?? null,
           };
         }),
         next_cursor: rows.length > input.limit && last ? encodeCursor(last.capturedAt.toISOString(), last.id) : null,

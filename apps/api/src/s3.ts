@@ -17,10 +17,31 @@ export const s3 = new S3Client({
 
 const B = env.s3.bucket;
 
+// ── 后端能力(ADR-048)──────────────────────────────────────────────────
+// 不假定后端支持什么,启动时探测一次。R2 对 `x-amz-object-lock-mode` 返回 501 拒绝
+// (**明确拒绝而非静默忽略** —— 这点很重要:不会出现"以为上了锁其实没上"的静默降级),
+// 因此带锁参数的写入在 R2 上会每次硬失败。探测后按能力分流。
+export interface BackendCapabilities {
+  /** 逐对象保留锁(GOVERNANCE)。false ⇒ WORM 不由服务端强制,靠 ADR-048 的三条补偿 */
+  objectLock: boolean;
+}
+let caps: BackendCapabilities = { objectLock: true };
+export function backendCapabilities(): BackendCapabilities {
+  return caps;
+}
+
 function retainUntil(): Date {
   const d = new Date();
   d.setFullYear(d.getFullYear() + LOCK_RETENTION_YEARS);
   return d;
+}
+
+/** 锁参数:后端不支持时返回空对象。
+ *  **禁止**在此处静默降级而不播报 —— 姿态由 startupProbe 如实打印。 */
+function lockParams(): { ObjectLockMode?: 'GOVERNANCE'; ObjectLockRetainUntilDate?: Date } {
+  return caps.objectLock
+    ? { ObjectLockMode: 'GOVERNANCE', ObjectLockRetainUntilDate: retainUntil() }
+    : {};
 }
 
 const isStatus = (e: unknown, ...codes: number[]) =>
@@ -34,8 +55,7 @@ export async function putWorm(key: string, body: Buffer, contentType: string): P
       new PutObjectCommand({
         Bucket: B, Key: key, Body: body, ContentType: contentType,
         IfNoneMatch: '*',
-        ObjectLockMode: 'GOVERNANCE',
-        ObjectLockRetainUntilDate: retainUntil(),
+        ...lockParams(),
       }),
     );
     return 'created';
@@ -72,8 +92,7 @@ export async function appendJsonl(key: string, line: Buffer): Promise<void> {
         new PutObjectCommand({
           Bucket: B, Key: key, Body: body, ContentType: 'application/jsonl',
           ...(existing ? { IfMatch: existing.etag } : { IfNoneMatch: '*' }),
-          ObjectLockMode: 'GOVERNANCE',
-          ObjectLockRetainUntilDate: retainUntil(),
+          ...lockParams(),
         }),
       );
       return;
@@ -116,8 +135,7 @@ export async function copyWithLock(fromKey: string, toKey: string, contentType: 
       CopySource: `${B}/${encodeURIComponent(fromKey).replace(/%2F/g, '/')}`,
       MetadataDirective: 'REPLACE',
       ContentType: contentType,
-      ObjectLockMode: 'GOVERNANCE',
-      ObjectLockRetainUntilDate: retainUntil(),
+      ...lockParams(),
     }),
   );
 }
@@ -208,25 +226,52 @@ export async function startupProbe(): Promise<void> {
   }
   if (!badChecksum) throw new Error('探针失败:错误 sha256 校验和未被拒绝');
 
-  // 4. CopyObject 附锁参数 → 回读 GOVERNANCE(lock-probe,最短保留,留置)
+  // 4+5. 逐对象保留锁。**这一段是能力探测,不是硬性要求**(ADR-048):
+  //      不支持时按补偿措施运行并如实播报姿态,而不是拒绝启动 ——
+  //      但也绝不静默降级,姿态每次启动都打印。
   const lockKey = buildKey.probe('lock-probe', suffix);
   const until = new Date(Date.now() + PROBE_RETENTION_MS);
-  await s3.send(new CopyObjectCommand({
-    Bucket: B, Key: lockKey, CopySource: `${B}/${key}`,
-    MetadataDirective: 'REPLACE',
-    ObjectLockMode: 'GOVERNANCE', ObjectLockRetainUntilDate: until,
-  }));
-  const lockHead = await s3.send(new HeadObjectCommand({ Bucket: B, Key: lockKey }));
-  if (lockHead.ObjectLockMode !== 'GOVERNANCE') {
-    throw new Error('探针失败:CopyObject 未能附加 GOVERNANCE 锁');
-  }
-
-  // 5. 无特权删除被锁版本 → 应被拒
-  let lockEnforced = false;
+  let lockSupported = false;
   try {
-    await s3.send(new DeleteObjectCommand({ Bucket: B, Key: lockKey, VersionId: lockHead.VersionId! }));
-  } catch {
-    lockEnforced = true;
+    await s3.send(new CopyObjectCommand({
+      Bucket: B, Key: lockKey, CopySource: `${B}/${key}`,
+      MetadataDirective: 'REPLACE',
+      ObjectLockMode: 'GOVERNANCE', ObjectLockRetainUntilDate: until,
+    }));
+    const lockHead = await s3.send(new HeadObjectCommand({ Bucket: B, Key: lockKey }));
+    if (lockHead.ObjectLockMode !== 'GOVERNANCE') {
+      throw new Error('CopyObject 未能附加 GOVERNANCE 锁(参数被静默忽略)');
+    }
+    // 无特权删除被锁版本 → 必须被拒。锁"配上了但拦不住"比不支持更危险。
+    let lockEnforced = false;
+    try {
+      await s3.send(new DeleteObjectCommand({ Bucket: B, Key: lockKey, VersionId: lockHead.VersionId! }));
+    } catch {
+      lockEnforced = true;
+    }
+    if (!lockEnforced) throw new Error('GOVERNANCE 锁未拦截无特权版本删除');
+    lockSupported = true;
+  } catch (e) {
+    if (isStatus(e, 501) || (e instanceof S3ServiceException && e.name === 'NotImplemented')) {
+      lockSupported = false;   // 后端明确不支持(R2)
+    } else {
+      // 支持但行为不对 —— 这是缺陷,不是能力差异,必须拒绝启动
+      throw new Error(`探针失败:逐对象锁行为异常 —— ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
-  if (!lockEnforced) throw new Error('探针失败:GOVERNANCE 锁未拦截无特权版本删除');
+  caps = { objectLock: lockSupported };
+
+  // ── WORM 姿态:如实播报,不许悄悄降级(ADR-048)──
+  if (lockSupported) {
+    console.log('[s3] WORM 姿态:✓ 逐对象保留锁由服务端强制');
+  } else {
+    console.warn(
+      '[s3] WORM 姿态:✗ **服务端不强制 WORM**(后端不支持逐对象保留锁)。\n' +
+      '     ADR-048 要求三条补偿全部到位,缺一不可:\n' +
+      '       ① L1 一律 If-None-Match: * 仅创建写 —— 已由 putWorm 强制,且本探针刚验证过条件写生效\n' +
+      '       ② 前缀级保留策略(R2 Bucket Locks,只能经 Cloudflare 控制面配置)\n' +
+      '       ③ 异地冷备到支持 Object Lock 的存储或离线介质\n' +
+      '     ②③ 未落实之前,本桶不得承载生产 L1。',
+    );
+  }
 }

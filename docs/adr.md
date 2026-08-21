@@ -748,8 +748,8 @@ AI 读 → 确定性判定对错 → AI 带着判定结果重读 → 确定性�
 | `PutObject` + `ChecksumSHA256`(服务端路径) | ✅ | |
 | `CopyObject`(`_incoming` → 最终 key) | ✅ | 搬运链不变 |
 | Multipart | ✅ | D14 可做 |
-| 预签名 PUT | ⚠️ 可用,但**不得携带 `x-amz-checksum-sha256`** | 带该头必 403 `SignatureDoesNotMatch`(7 种变体逐一验证) |
-| 预签名 PUT + `Content-MD5` | ✅ 且**真的强制**(错误摘要 → 400) | 直传完整性闸门的替代品 |
+| 预签名 PUT + `x-amz-checksum-sha256` | ✅ **完全可用且真的强制**(错误摘要 → 400 `BadDigest`) | 见下方"更正" |
+| 预签名 PUT + `Content-MD5` | ✅ 亦可用且强制 | 不再需要 —— 见"更正" |
 | 对象版本化 / `ListObjectVersions` | ❌ **501 NotImplemented** | 覆盖即永久丢失;A17 的 `(Key,VersionId,ETag)` 取证手段失效 |
 | `PutObjectRetention`(逐对象治理模式) | ❌ **501 NotImplemented** | docs/04 §1 的 object-lock 列失去服务端逐对象强制 |
 | 桶配置类(versioning/objectlock/cors/lifecycle) | ⚠️ 403 AccessDenied | 疑为 token 权限档次(需 **Admin Read & Write**),待复验 |
@@ -781,6 +781,23 @@ AI 读 → 确定性判定对错 → AI 带着判定结果重读 → 确定性�
 | `PutObjectLockConfiguration`(`?object-lock`) | ❌ **501 NotImplemented**(`GET` 返 404 说明该 API 存在但无配置,`PUT` 未实现) |
 | `?lock` 子资源 | ❌ 501 —— R2 Bucket Locks **不经 S3 API 暴露** |
 | Cloudflare 控制面(`api.cloudflare.com`) | ⛔ 本开发环境的出网策略拒绝 CONNECT(403),无法从此处配置 |
+
+> ### ⚠️ 更正(2026-08-21,部署测试期实测)
+>
+> 本 ADR 初版断言"R2 的预签名 PUT 不得携带 `x-amz-checksum-sha256`,带了必 403,须改签 `Content-MD5` + 服务端重算 sha256"。
+> **这条是错的,原因在我的探针,不在 R2。**
+>
+> `getSignedUrl` 默认会把 `x-amz-checksum-sha256` **提升(hoist)为签名查询参数**;此时再把它作为请求头发一遍,
+> 签名自然不匹配 → 403。传 `unhoistableHeaders: new Set(['x-amz-checksum-sha256'])` 让它留在 `SignedHeaders` 里,
+> path-style 与 virtual-host **两种都通过**,且错误摘要会被 R2 以 `400 BadDigest` 拒绝 —— 强制是真的。
+>
+> 而 `apps/api/src/s3.ts` 的 `presignPut` 从 M0 起就一直传了 `unhoistableHeaders`,所以**应用侧本来就是对的**;
+> 是我另写的探针漏了这个选项,又把探针结果当成了后端能力。
+>
+> **后果:** ①"上传链的校验和改道 Content-MD5 + 服务端重算 sha256"(原后果 1)**取消**,R2 上的直传链与
+> MinIO/S3 完全同构,无需任何改动;②这也解释了为什么 2026-08-21 的部署冒烟能在 R2 上 17/17 通过。
+> ③ **教训:探针失败先怀疑探针。** 用一个跟被测系统不同的调用路径去"验证"能力,验的是两条路径的差异,不是能力本身。
+> 判据应当是**产品代码实际走的那条路径**。
 
 **一个值得庆幸的细节:** R2 对带 `x-amz-object-lock-mode` 头的 `PutObject` 返回 **501 拒绝**,而不是静默忽略。这意味着现有 `s3.ts`(`putObject`/`appendJsonl` 都传 `ObjectLockMode: 'GOVERNANCE'`)在 R2 上会**每次 L1 写入都硬失败**,不会出现"以为上了锁其实没上"的静默降级 —— 后者才是真正危险的。代价是:**在 ADR-048/049 的实现落地之前,本应用无法对 R2 运行**。
 

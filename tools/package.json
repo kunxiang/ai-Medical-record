@@ -17,7 +17,8 @@
     "regen-derivatives": "tsx src/regen-derivatives.ts",
     "m1:acceptance": "tsx src/m1-acceptance.ts",
     "probe-storage": "tsx src/probe-storage.ts",
-    "probe-presign": "tsx src/probe-presign.ts"
+    "probe-presign": "tsx src/probe-presign.ts",
+    "deploy-smoke": "tsx src/deploy-smoke.ts"
   },
   "dependencies": {
     "@amr/contracts": "workspace:*",

@@ -25,8 +25,13 @@ interface Variant {
   checksum: boolean;
   sendChecksumHeader: boolean;
   contentType: boolean;
+  /** 把校验和头标为 unhoistable ⇒ 它进 SignedHeaders 而不是被提升成查询参数。
+   *  不传这个选项时 SDK 会 hoist,再作为 header 发一遍就签名不匹配 —— 这曾被我误判为"R2 不支持"。 */
+  unhoistable?: boolean;
 }
 const variants: Variant[] = [
+  { name: '★ path-style + 校验和 + unhoistableHeaders + 发头', pathStyle: true, checksum: true, sendChecksumHeader: true, contentType: true, unhoistable: true },
+  { name: '★ virtual-host + 校验和 + unhoistableHeaders + 发头', pathStyle: false, checksum: true, sendChecksumHeader: true, contentType: true, unhoistable: true },
   { name: 'path-style + 无校验和', pathStyle: true, checksum: false, sendChecksumHeader: false, contentType: true },
   { name: 'path-style + 签名含校验和 + 发头', pathStyle: true, checksum: true, sendChecksumHeader: true, contentType: true },
   { name: 'path-style + 签名含校验和 + 不发头', pathStyle: true, checksum: true, sendChecksumHeader: false, contentType: true },
@@ -45,7 +50,10 @@ for (const v of variants) {
       Bucket: BUCKET, Key: key,
       ...(v.contentType ? { ContentType: 'text/plain' } : {}),
       ...(v.checksum ? { ChecksumSHA256: shaB64 } : {}),
-    }), { expiresIn: 900 });
+    }), {
+      expiresIn: 900,
+      ...(v.unhoistable ? { unhoistableHeaders: new Set(['x-amz-checksum-sha256']) } : {}),
+    });
     const headers: Record<string, string> = {};
     if (v.contentType) headers['content-type'] = 'text/plain';
     if (v.sendChecksumHeader) headers['x-amz-checksum-sha256'] = shaB64;
