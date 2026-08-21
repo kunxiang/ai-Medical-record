@@ -128,8 +128,11 @@ const meta = response.parsed_output!;
 
 **要点:**
 
-- **`cache_control` 放在稳定的 system prompt 上。** Opus 5 的最小可缓存前缀是 512 token,提取 prompt 一定超过。缓存命中后这部分只按 0.1× 计价。
+- **`cache_control` 放在稳定的 system prompt 上。** 最小可缓存前缀约 **1024 token**(不足则静默不缓存),提取 prompt 一定超过。缓存命中后这部分只按 0.1× 计价。渲染顺序是 `tools` → `system` → `messages`,易变内容(每次不同的图、请求 id)必须排在最后一个 `cache_control` 断点之后。
 - **图片用预签名 URL**,不用 base64 —— 后者让请求体膨胀 1/3。
+- **送进模型的必须是 L2 派生物,不是原件(ADR-050)。** Claude **不解析图片元数据**,原件里的 EXIF `Orientation` 会被完全忽略 —— Orientation=6 的照片会以横躺姿势进入模型。派生物在生成时已按 Orientation 旋正。
+- **图在文字之前。** 官方指引:image 块排在 text 块前面效果最好。
+- **PDF 不是 image。** 图片格式仅限 JPEG/PNG/GIF/WebP;PDF 必须走 `document` 块(base64,单请求 32 MB / 600 页上限)。
 - 日期一律要求 `YYYY-MM-DD`,解析失败置 null 而非猜测。
 
 ---
