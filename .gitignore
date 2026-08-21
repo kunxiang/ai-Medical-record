@@ -9,3 +9,6 @@ coverage/
 fixtures/m1/*.jpg
 fixtures/m1/*.png
 fixtures/m1/*.pdf
+
+# R2 凭证
+infra/r2.env

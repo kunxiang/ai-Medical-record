@@ -769,7 +769,7 @@ AI 读 → 确定性判定对错 → AI 带着判定结果重读 → 确定性�
 
 | 项 | 结论 |
 |---|---|
-| CORS(`PutBucketCors`/`GetBucketCors`) | ✅ 经 S3 API 可配,已落地并通过 preflight 行为自检 |
+| CORS(`PutBucketCors`/`GetBucketCors`) | ✅ 经 S3 API 可配。已落地来源 `https://medireco.eckstein.pro`(生产,暂定)与 `http://localhost:5173`(开发),两者**逐个**通过 preflight 行为自检 |
 | Lifecycle(`PutBucketLifecycleConfiguration`) | ✅ 已落地 `incoming-cleanup`(7 天 + 分片中止 1 天)与 `probe-cleanup` |
 | `PutBucketVersioning` / `ListObjectVersions` | ❌ **501 NotImplemented**(admin 档下仍然)—— 确证 R2 无对象版本化,非权限问题 |
 | `PutObjectRetention` | ❌ **501 NotImplemented** —— 确证无逐对象保留锁 |

@@ -157,27 +157,31 @@ async function main(): Promise<void> {
     failures.push('SSE 未配置(生产强制)');
   }
 
-  // CORS 自检:发真实 preflight,验证**行为**而非配置(m1/CHANGES #2)
-  const origin = WEB_ORIGINS[0]!;
-  try {
-    const pre = await fetch(`${ENDPOINT}/${BUCKET}/_probe/cors-preflight`, {
-      method: 'OPTIONS',
-      headers: {
-        origin,
-        'access-control-request-method': 'PUT',
-        'access-control-request-headers': 'content-type,content-md5',
-      },
-    });
-    const allowOrigin = pre.headers.get('access-control-allow-origin');
-    const allowHeaders = (pre.headers.get('access-control-allow-headers') ?? '').toLowerCase();
-    if (pre.status >= 400) failures.push(`CORS preflight 失败: HTTP ${pre.status}`);
-    else if (!allowOrigin || (allowOrigin !== '*' && allowOrigin !== origin)) {
-      failures.push(`CORS preflight allow-origin 不匹配: ${allowOrigin}`);
-    } else if (!(allowHeaders.includes('content-md5') || allowHeaders.includes('*'))) {
-      failures.push(`CORS preflight 未放行 content-md5: ${allowHeaders}`);
+  // CORS 自检:对**每个**来源发真实 preflight,验证行为而非配置(m1/CHANGES #2)。
+  // 逐个验:配了三个来源却只验第一个,等于另外两个没验 —— 而漏放行的代价是整条直传链死。
+  for (const origin of WEB_ORIGINS) {
+    try {
+      const pre = await fetch(`${ENDPOINT}/${BUCKET}/_probe/cors-preflight`, {
+        method: 'OPTIONS',
+        headers: {
+          origin,
+          'access-control-request-method': 'PUT',
+          'access-control-request-headers': 'content-type,content-md5',
+        },
+      });
+      const allowOrigin = pre.headers.get('access-control-allow-origin');
+      const allowHeaders = (pre.headers.get('access-control-allow-headers') ?? '').toLowerCase();
+      if (pre.status >= 400) failures.push(`CORS preflight 失败(${origin}): HTTP ${pre.status}`);
+      else if (!allowOrigin || (allowOrigin !== '*' && allowOrigin !== origin)) {
+        failures.push(`CORS preflight allow-origin 不匹配(${origin}): ${allowOrigin}`);
+      } else if (!(allowHeaders.includes('content-md5') || allowHeaders.includes('*'))) {
+        failures.push(`CORS preflight 未放行 content-md5(${origin}): ${allowHeaders}`);
+      } else {
+        console.log(`  CORS preflight ✓ ${origin}`);
+      }
+    } catch (e) {
+      failures.push(`CORS preflight 探测失败(${origin}): ${shortMsg(e)}`);
     }
-  } catch (e) {
-    failures.push(`CORS preflight 探测失败: ${shortMsg(e)}`);
   }
 
   // ===== WORM 姿态:如实播报,不许悄悄降级 =====
