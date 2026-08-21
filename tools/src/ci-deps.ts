@@ -41,6 +41,30 @@ if (existsSync(webPkgPath)) {
   if (webImports.length) failures.push(`apps/web 直接 import 服务端包:\n${webImports.join('\n')}`);
 }
 
+// m2-99 B1: packages/ai 只依赖 @anthropic-ai/sdk 与 @amr/contracts
+const aiPkgPath = path.join(root, 'packages/ai/package.json');
+if (existsSync(aiPkgPath)) {
+  const aiDeps = Object.keys((JSON.parse(readFileSync(aiPkgPath, 'utf-8')).dependencies ?? {}) as Record<string, string>);
+  const allowed = new Set(['@amr/contracts', '@anthropic-ai/sdk', 'zod']);
+  const bad = aiDeps.filter((d) => !allowed.has(d));
+  if (bad.length) failures.push(`m2 B1: packages/ai 依赖越界: ${bad.join(',')}`);
+  const aiImports = grep("from '@amr/(api|storage)", path.join(root, 'packages/ai/src'));
+  if (aiImports.length) failures.push(`m2 B1: packages/ai 直接 import 服务端包:\n${aiImports.join('\n')}`);
+}
+
+// m2-99 B2: 模型 ID 只在 packages/ai/src/models.ts 出现。
+// 扫描范围排除 fixtures(录制盒内必然含模型名)与 docs(审核 #003 A8)。
+{
+  const srcDirs = ['packages', 'apps', 'tools/src']
+    .map((d) => path.join(root, d))
+    .filter((d) => existsSync(d));
+  const hits = srcDirs
+    .flatMap((d) => grep("['\"]claude-[a-z0-9-]+['\"]", d))
+    .filter((l) => !l.includes('/node_modules/') && !l.includes('/dist/') && !l.includes('/fixtures/'))
+    .filter((l) => !l.includes('packages/ai/src/models.ts'));
+  if (hits.length) failures.push(`m2 B2: 模型 ID 只允许出现在 packages/ai/src/models.ts:\n${hits.join('\n')}`);
+}
+
 // B7: 全部路由经 defineRoute —— 禁止裸注册
 const bare = grep('app\\.(get|post|patch|delete|put)\\(', path.join(root, 'apps/api/src'));
 const bareFiltered = bare.filter((l) => !l.includes('define-route.ts'));
@@ -167,4 +191,4 @@ if (failures.length) {
   console.error('ci:deps 失败:\n' + failures.map((f) => '— ' + f).join('\n'));
   process.exit(1);
 }
-console.log('ci:deps 通过(m0-99 B1/B2/B7/B8 · m1-99 B1/B5/B6/B7/B8/B12)');
+console.log('ci:deps 通过(m0-99 B1/B2/B7/B8 · m1-99 B1/B5/B6/B7/B8/B12 · m2-99 B1/B2)');

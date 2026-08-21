@@ -114,12 +114,12 @@ describe('capture_date 折算(spec m0-03 §3)', () => {
 });
 
 describe('derived key(M1 · m1-03 §1;m0/CHANGES #7)', () => {
-  it('thumb/preview/meta 往返', () => {
+  it('thumb/preview/ai/meta 往返', () => {
     for (let i = 0; i < 300; i++) {
       const personSlug = 'p' + randomSlugTail();
       const docShortId = 'd' + randomSlugTail();
       const pageNo = 1 + rand(99);
-      for (const variant of ['thumb', 'preview'] as const) {
+      for (const variant of ['thumb', 'preview', 'ai'] as const) {
         const k = buildKey.derivative({ personSlug, docShortId, variant, pageNo });
         expect(parseKey(k)).toEqual({ kind: 'derivative', personSlug, docShortId, variant, pageNo });
       }
@@ -130,5 +130,8 @@ describe('derived key(M1 · m1-03 §1;m0/CHANGES #7)', () => {
   it('非法 derived key 抛错', () => {
     expect(() => parseKey('derived/p3f7a2/d7k2m9/thumb-1.webp')).toThrow();
     expect(() => parseKey('derived/p3f7a2/d7k2m9/thumb-01.jpg')).toThrow();
+    // ai 是 ADR-050 新增的合法变体,但拼写必须精确 —— 别的变体名一律拒
+    expect(() => parseKey('derived/p3f7a2/d7k2m9/AI-01.webp')).toThrow();
+    expect(() => parseKey('derived/p3f7a2/d7k2m9/ai2-01.webp')).toThrow();
   });
 });

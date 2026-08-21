@@ -82,6 +82,8 @@ export function registerBrowseRoutes(app: FastifyInstance): void {
   });
 
   // ── 派生物:302 重定向(m1-01 §B2 / m1-02 §2)─────────────────────────
+  // 只有这两个是**浏览**变体。ai 变体(ADR-050)是服务端内部喂给模型的输入,
+  // 由 AI 管线自行生成并预签名 —— 不开放为浏览端点,别"顺手"把它加进这个数组。
   for (const variant of ['thumb', 'preview'] as const) {
     defineRoute(app, {
       method: 'GET',

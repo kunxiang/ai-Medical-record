@@ -1,0 +1,33 @@
+import Anthropic from '@anthropic-ai/sdk';
+
+// spec m2-99 §0:模型调用的注入点。
+//
+// A/B 组验收断言的是**工程正确性**,不是模型输出 —— 而真实调用既慢又贵,
+// 且同一输入两次运行结果可能不同。所以调用必须可替换为录制回放。
+// 默认实现是真实 SDK;测试用 setTransport 换掉。
+
+export type BetaMessageCreateParams = Parameters<Anthropic['beta']['messages']['create']>[0];
+export type BetaMessage = Awaited<ReturnType<Anthropic['beta']['messages']['create']>>;
+
+export type Transport = (params: BetaMessageCreateParams) => Promise<BetaMessage>;
+
+let client: Anthropic | null = null;
+function realClient(): Anthropic {
+  // 零参构造:凭证由 SDK 从环境解析(ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN / ant 配置档)。
+  // 禁止在代码里硬编码 key(m2-02 §1)。
+  client ??= new Anthropic({ timeout: 600_000 });   // TypeScript SDK 的单位是**毫秒**
+  return client;
+}
+
+const realTransport: Transport = async (params) =>
+  (await realClient().beta.messages.create(params)) as BetaMessage;
+
+let current: Transport = realTransport;
+
+export function setTransport(t: Transport | null): void {
+  current = t ?? realTransport;
+}
+
+export function getTransport(): Transport {
+  return current;
+}

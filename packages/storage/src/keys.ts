@@ -11,6 +11,9 @@ const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 
 const KEY_BYTES_RE = /^[a-z0-9._/-]+$/;
 
+/** 派生物变体(ADR-050 新增 ai:送进模型的输入,旋正 + 长边 2576 + q92) */
+export type DerivativeVariant = 'thumb' | 'preview' | 'ai';
+
 export type ParsedKey =
   | { kind: 'page'; personSlug: string; year: string; captureDate: string; docShortId: string; pageNo: number; ext: string }
   | { kind: 'pageMeta'; personSlug: string; year: string; captureDate: string; docShortId: string; pageNo: number }
@@ -25,7 +28,7 @@ export type ParsedKey =
   | { kind: 'incoming'; batchId: string; uploadId: string }
   | { kind: 'probe'; name: 'startup' | 'lock-probe' }
   | { kind: 'derivedMeta'; personSlug: string; docShortId: string }
-  | { kind: 'derivative'; personSlug: string; docShortId: string; variant: 'thumb' | 'preview'; pageNo: number };
+  | { kind: 'derivative'; personSlug: string; docShortId: string; variant: DerivativeVariant; pageNo: number };
 
 function docdirPrefix(personSlug: string, captureDate: string, docShortId: string): string {
   const year = captureDate.slice(0, 4);
@@ -64,7 +67,7 @@ export const buildKey = {
   // derived 构造器(M1:派生物落地;m1-03 §1)
   derivedMeta: (p: { personSlug: string; docShortId: string }) =>
     check(`derived/${p.personSlug}/${p.docShortId}/meta.json`),
-  derivative: (p: { personSlug: string; docShortId: string; variant: 'thumb' | 'preview'; pageNo: number }) =>
+  derivative: (p: { personSlug: string; docShortId: string; variant: DerivativeVariant; pageNo: number }) =>
     check(`derived/${p.personSlug}/${p.docShortId}/${p.variant}-${pad2(p.pageNo)}.webp`),
   derivedPrefix: (p: { personSlug: string; docShortId: string }) =>
     check(`derived/${p.personSlug}/${p.docShortId}/`),
@@ -119,10 +122,10 @@ const MATCHERS: Array<[RegExp, (m: RegExpExecArray) => ParsedKey]> = [
     (m) => ({ kind: 'derivedMeta', personSlug: m[1]!, docShortId: m[2]! }),
   ],
   [
-    new RegExp(`^derived/(${PSLUG})/(${DSLUG})/(thumb|preview)-(\\d{2})\\.webp$`),
+    new RegExp(`^derived/(${PSLUG})/(${DSLUG})/(thumb|preview|ai)-(\\d{2})\\.webp$`),
     (m) => ({
       kind: 'derivative', personSlug: m[1]!, docShortId: m[2]!,
-      variant: m[3]! as 'thumb' | 'preview', pageNo: parseInt(m[4]!, 10),
+      variant: m[3]! as DerivativeVariant, pageNo: parseInt(m[4]!, 10),
     }),
   ],
   [
