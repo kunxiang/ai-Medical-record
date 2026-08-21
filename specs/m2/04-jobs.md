@@ -21,16 +21,26 @@ CREATE TABLE ai_job (
   locked_by         text,                   -- 实例标识,用于排查
   last_error        jsonb,                  -- { stage, code, message, category?, at }
   result_key        text,                   -- S1 工件 key
+  dedup_key         text NOT NULL,          -- ★ 去重键,见下
   created_at        timestamptz NOT NULL DEFAULT now(),
   updated_at        timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT aj_kind  CHECK (kind IN ('stage1','facility_normalize','encounter_suggest')),
   CONSTRAINT aj_state CHECK (state IN ('pending','running','done','failed','needs_human','unsupported'))
 );
-CREATE UNIQUE INDEX uq_ai_job_doc_kind ON ai_job (document_id, kind) WHERE document_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_ai_job_dedup ON ai_job (dedup_key);
 CREATE INDEX idx_ai_job_ready ON ai_job (state, next_attempt_at) WHERE state = 'pending';
 ```
 
-1. `uq_ai_job_doc_kind` **必须**存在:同一文档同一类型的作业**只能有一条**。重复投递 **必须** `ON CONFLICT DO NOTHING`,**禁止**产生第二条。
+1. `dedup_key` 的构造(审核 #003 A5):
+
+| kind | `dedup_key` |
+|---|---|
+| `stage1` | `'stage1:' || document_id` |
+| `facility_normalize` | `'facility:' || input_fingerprint` |
+| `encounter_suggest` | `'encounter:' || person_id || ':' || to_char(event_time, 'YYYY-MM-DD')` |
+
+   > 早先的 `UNIQUE (document_id, kind) WHERE document_id IS NOT NULL` 是错的:`encounter_suggest` 是跨文档作业、`document_id` 为 null,**完全不受该索引约束**,重复投递会无限累积。
+   `uq_ai_job_dedup` **必须**存在。重复投递 **必须** `ON CONFLICT DO NOTHING`,**禁止**产生第二条。
 2. `ai_job` 属 **L2**:删库重建后为空,**禁止**因缺少 job 记录而使任何 L1 数据不可用。`rebuild-index` **必须**为缺 `s1_artifact_key` 的文档重新投递 `stage1` 作业(而不是恢复旧 job 行)。
 
 ## 3. 状态机

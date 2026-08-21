@@ -46,7 +46,9 @@
 | A25 | 超 20 页分批 | 25 页文档 → 分 2 批,每批 ≤ 20;合并后 `pages` 恰 25 条且 `page_no` 无重复;工件含 `batches: 2` |
 | A26 | 超限 PDF | 700 页 PDF → job `unsupported`,不重试,可在 `GET /jobs` 中查到 |
 | A27 | **L2 可整体丢弃** | 删光 `derived/**` 与全部 `ai_job` 行 → 重跑 → S1 工件与 DB 派生列恢复;**L1 快照逐字节不变** |
-| A28 | **L1 零字节变动(A 组全程)** | A 组开始时取 `people/**` 的 (Key,VersionId,ETag) 全量清单,结束时再取,逐字节相同 |
+| A28a | **L1 既有对象不可变** | 基线只取 `page-NN.*`(原件)、`capture.json`、`page-NN.json` 三类 key 的 (Key,VersionId,ETag);A 组结束时逐字节相同。**追加类对象(journal / manifests / `correction-NNNN.json`)不进基线**(审核 #003 A3) |
+| A28b | **L1 只增不改** | A 组结束时 `people/**` 的对象集合相对基线**只允许新增**;任何既有 key 出现新版本即失败 —— 追加类对象也是 `If-None-Match: *` 仅创建写,被覆盖即缺陷 |
+| A21b | 拆分后重建 | A21 之后删库 → migrate → seed → rebuild → **拆分结果原样复原**(页归属、页序、新文档均在);未复原即失败(审核 #003 A4) |
 | A29 | 越权 | 他人文档的 `/ai`、`/rerun`、`/reassign` 一律 404,且与不存在不可区分 |
 | A30 | 矩阵覆盖 | 桶内对象 ⊆ 权威矩阵(`parseKey` 全通过,含新增 `ai-NN.webp` 与 `extractions/` 两类 key) |
 
@@ -55,7 +57,7 @@
 | # | 断言 |
 |---|---|
 | B1 | `packages/ai` 只依赖 `@anthropic-ai/sdk` 与 `@amr/contracts`;不 import `@amr/api` / `@amr/storage` |
-| B2 | 模型 ID 只在 `packages/ai/src/models.ts` 出现一次;全仓无内联 `claude-` 字面量(除该文件与文档) |
+| B2 | 模型 ID 只在 `packages/ai/src/models.ts` 出现一次。扫描范围**仅限** `packages/**/src`、`apps/**/src`、`tools/src`;**必须**排除 `fixtures/**`(录制盒内必然含模型名)与 `docs/**`(审核 #003 A8) |
 | B3 | **缓存生效**:连续两次同 prompt 调用,第二次 `usage.cache_read_input_tokens > 0` |
 | B4 | **prompt 完整性**:篡改任一 prompt 文件而不改 `manifest.json` → 启动失败 |
 | B5 | 新增 7 个 journal 事件在 `_meta/schemas`、`_meta/registries`、`_meta/README.md` 三处齐备 |
@@ -85,4 +87,4 @@
 
 ## 完成定义
 
-A(30 项)+ B(12 项)全绿,C 组基线已记录,D7/D14/D15/软删除四笔设计债勾销 → M2 关闭。
+A(32 项)+ B(12 项)全绿,C 组基线已记录,D7/D14/D15/软删除四笔设计债勾销 → M2 关闭。

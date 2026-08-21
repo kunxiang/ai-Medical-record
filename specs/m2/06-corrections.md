@@ -36,7 +36,17 @@
 | `POST /documents/:id/merge` body `{ absorb_document_id }` | 把另一文档的页并入本文档尾部 |
 | `POST /documents/:id/move-page` body `{ page_no, to_document_id }` | 单页移动 |
 
-1. 与归人纠正同理:**S3 原件不动**。新文档的页以 `correction-{NNNN}.json` 记录来源,并在 manifests 追加。
+1. 与归人纠正同理:**S3 原件不动**。页的归属变更以 `correction-{NNNN}.json` 记录,并在 manifests 追加。
+
+   **重建故事(审核 #003 A4 —— 没有这条,D7 就是"能用但重建后消失"的功能):**
+
+   a. `CorrectionSidecar.kind` 扩展为 `person_reassign | page_move`。拆分与合并**均分解为一组 `page_move`**,不另立类型。
+   b. `page_move` 载荷 **必须**含 `{ seq, from_doc_short_id, to_doc_short_id, page_sha256, from_page_no, to_page_no }`。
+      > **用 `page_sha256` 而非 key 定位页**:key 里的 `NN` 是拍摄序且永不改名(ADR-047),移页之后 key 与所属文档不再对应,只有内容摘要是稳定锚点。
+   c. `split` **必须**同时向 manifests 追加新文档的 `add` 行 —— 新文档没有自己的 `capture.json`,其 `person_id` 只能由该 `add` 行提供。
+   d. `rebuild-index` 的重放顺序 **必须**是:①按 manifests 建文档骨架 → ②读各目录 `capture.json` 恢复页 → ③**扫描全部 `correction-*.json`,按 `(created_at, seq)` 全局排序后重放 `page_move`**。
+   e. 重放 `page_move` 时目标文档若不存在,**必须**由 `to_doc_short_id` 触发建档(其归属取自 c 的 `add` 行)。
+   f. 验收断言 [99](./99-acceptance.md) A21b:拆分后删库重建 → 拆分结果原样复原。
 2. `document_page.page_no` **必须**在目标文档内重排为从 1 起的连续序列;`capture_order` **禁止**改动(ADR-047:它是拍摄瞬间的 L1 事实)。
 3. 幂等:三个接口 **必须**接受 `client_operation_id`,重复提交 **必须**返回首次结果(与 m0-06 §3 同构),**禁止**产生第二次拆分。
 4. S1 的 `boundary_hint`([03](./03-stage1.md) §1)**只是建议**,**禁止**自动执行拆分。

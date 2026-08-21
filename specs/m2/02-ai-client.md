@@ -12,11 +12,13 @@
 ## 2. 请求形状(S1)
 
 ```ts
-const res = await client.messages.parse({
+// ★ 必须走 beta 命名空间:fallbacks 只在 client.beta.messages.create 上可用,
+//   而 client.messages.parse() 位于非 beta 命名空间且不接受 betas —— 二者不能混用(审核 #003 A1)。
+const res = await client.beta.messages.create({
   model: MODEL,                    // 'claude-opus-5'
   max_tokens: 16000,
   output_config: {
-    format: zodOutputFormat(Stage1Schema),
+    format: zodOutputFormat(Stage1Out),   // 取其返回值作为 format,不用 parse() 的便利
     effort: 'medium',
   },
   system: [{ type: 'text', text: prompt.text, cache_control: { type: 'ephemeral' } }],
@@ -24,11 +26,13 @@ const res = await client.messages.parse({
   betas: ['server-side-fallback-2026-07-01'],
   fallbacks: 'default',
 });
+// 结构化输出由调用方自行校验(放弃 parsed_output,换取与 fallbacks 共存)
+const parsed = Stage1Out.parse(JSON.parse(textOf(res.content)));
 ```
 
 规范性条文:
 
-1. **必须**用 `client.messages.parse()` 配合 `output_config.format` + `zodOutputFormat`。**禁止**使用已废弃的顶层 `output_format` 参数。**禁止**自行解析返回文本。
+1. **必须**用 `client.beta.messages.create()` 配合 `output_config.format`(值由 `zodOutputFormat(Stage1Out)` 生成)。**禁止**使用已废弃的顶层 `output_format` 参数。**禁止**使用 `client.messages.parse()` —— 它在非 beta 命名空间,与 `fallbacks` 不可共存(审核 #003 A1)。返回内容**必须**再经 `Stage1Out.parse()` 校验;校验失败按 §5.4 处理。
 2. **禁止**传 `thinking` 的 `budget_tokens`(Opus 5 上返回 400)。**禁止**显式 `{type:'disabled'}`。省略 `thinking` 即为 adaptive,这是本项目要的行为。
 3. `output_config.effort` **必须**为 `'medium'`。理由:S1 是抄写与分类任务,不是推理任务;更高档位只增加成本与延迟。
 4. `max_tokens` **必须** ≥ 16000(`full_text` 可能很长);若单页 `stop_reason === 'max_tokens'`,按 [04](./04-jobs.md) §4 记为可重试失败并以 32000 重试一次。
@@ -42,7 +46,7 @@ const res = await client.messages.parse({
 3. **图像块必须排在文本块之前**(官方指引:image-then-text 效果最好)。
 4. 多页文档一次调用送多页时:
    - **必须**按 `page_no` 升序送(ADR-047:`page_no` 是语义页序;M2 仍等于 `capture_order`,不得依赖这个巧合)。
-   - 每张图前**必须**插入一个文本块 `第 N 页:`,使后续引用有锚点。
+   - 每张图前**必须**插入一个文本块 `第 N 页:`,其中 **N 必须是全局 `page_no`,不是批内序号**(审核 #003 A7)。prompt 中须显式说明"页号已给出,直接采用,不要自行编号"。
    - **单次请求的 image 块数量必须 ≤ 20**。超过 20 会触发更严的逐图尺寸限制(每张 ≤ 2000 px),使 `ai` 变体的 2576 px 失效。页数 > 20 的文档**必须**分批调用,每批 ≤ 20 页,并在 [03](./03-stage1.md) §5 合并。
 5. **PDF 页禁止走 image 块**。图片格式仅限 JPEG/PNG/GIF/WebP。PDF **必须**以 `document` 块提交(base64,单请求 ≤ 32 MB、≤ 600 页);超限的 PDF 记为 `unsupported` 并进人工队列。
 

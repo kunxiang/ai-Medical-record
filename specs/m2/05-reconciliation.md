@@ -8,9 +8,10 @@
 
 1. S1 完成后 **必须**执行确定性比对:`Stage1Out.patient_name` 与 `person.display_name`(及 `person.name_pinyin`)。
 2. **禁止**因比对结果修改 `document.person_id`。一次也不行。**归人从不静默默认**是本里程碑的验收句之一。
-3. 比对规则(确定性,**禁止**再调 AI):
-   - 两侧先做 NFKC 归一 + 去除空白与常见分隔符;
-   - 完全相等 → `match`;
+3. 比对规则(确定性,**禁止**再调 AI;审核 #003 A6 补全 pinyin 用法):
+   - 两侧先做 NFKC 归一 + 去除空白与常见分隔符,记为 `norm()`;
+   - `norm(patient_name) === norm(display_name)` → `match`;
+   - 否则,`name_pinyin` 非空 **且** `norm(patient_name) === norm(name_pinyin)` → `match`;
    - `patient_name` 为 null → `unknown`;
    - 其余一律 → `mismatch`。
    > **禁止**引入模糊匹配阈值。"张伟" vs "张玮" 的相似度很高但是两个人;把这种判断交给阈值,等于用一个不可解释的数字决定病历归谁。
@@ -33,12 +34,22 @@
 
 ## 3. encounter 归组建议(ADR-037)
 
-1. 候选条件(**确定性预筛**,不调 AI):同 `person_id` **且** 同 `facility_id` **且** 两文档的 `event_time` 差 ≤ **12 小时**。
-   - `event_time` 取值优先级:`sampled_on` → `reported_on` → `capture_date`。**必须**记录实际取用的字段(`event_time_source`),否则事后无法判断归组依据。
-2. **禁止**用日历日归组。凌晨跨日的就诊会被错误拆开(ADR-037 的实证来源:急诊 05:09)。
-3. 预筛出的候选组 **必须**交 AI 判断"是否同一次就诊",产出 `proposal`;写入 `normalization_decision`(`kind='encounter'`)。
-4. **M2 只产出建议,禁止自动建 `encounter` 行。** 人工确认后才落库,并双写 journal(事件 `encounter_confirm`)。
-5. 采样事件(同一次就诊内的多次采样)**不建表**(ADR-037),M2 不实现。
+1. 候选条件(**确定性预筛**,不调 AI):同 `person_id` **且** 同 `facility_id` **且** 两文档的 `event_time` 满足下列之一。
+2. `event_time` 的取值与判据(审核 #003 A2):
+
+| 情形 | `event_time_source` | 判据 |
+|---|---|---|
+| 两侧 `document.event_at` 均非空 | `event_at` | 差 ≤ **12 小时** |
+| 仅一侧有 `event_at` | `event_at` | 另一侧用其 `sampled_on`/`reported_on` 的**当日 00:00–24:00 全区间**与之求交,有交集则为候选 |
+| 两侧都无 `event_at` | `capture_date_degraded` | `sampled_on`(缺则 `reported_on`,再缺则 `capture_date`)相同或**相邻一日**;该组**必须**在 UI 标注"判据较弱" |
+
+   > **不能假装有时分。** `sampled_on`/`reported_on` 是 `date` 类型 —— 报告上通常确实只印日期。对一个没有时分的字段做 ±12 小时窗口,算出来的是假精度,而且恰好退化成 ADR-037 明令禁止的按日历日归组。老老实实降级并**如实标注判据强度**,比算一个看起来精确的假窗口诚实。
+   > `document.event_at timestamptz`(可空)由 S1 在报告确实印有时分时填写,否则为 null。
+
+3. **禁止**在两侧都无 `event_at` 时使用 ±12 小时表述。凌晨跨日的就诊(ADR-037 实证:急诊 05:09、23:50 挂号次日 00:30 抽血)由"相邻一日"覆盖。
+4. 预筛出的候选组 **必须**交 AI 判断"是否同一次就诊",产出 `proposal`;写入 `normalization_decision`(`kind='encounter'`)。
+5. **M2 只产出建议,禁止自动建 `encounter` 行。** 人工确认后才落库,并双写 journal(事件 `encounter_confirm`)。
+6. 采样事件(同一次就诊内的多次采样)**不建表**(ADR-037),M2 不实现。
 
 ## 4. 三者的共同约束
 

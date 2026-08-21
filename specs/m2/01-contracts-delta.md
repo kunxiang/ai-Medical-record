@@ -20,7 +20,7 @@ export const AiJobState = z.enum(['pending','running','done','failed','needs_hum
 export const NormalizationKind = z.enum(['facility','encounter']);
 export const NormalizationState = z.enum(['proposed','confirmed','rejected']);
 export const PersonCheck = z.enum(['match','mismatch','unknown','skipped']);
-export const EventTimeSource = z.enum(['sampled_on','reported_on','capture_date']);
+export const EventTimeSource = z.enum(['event_at','capture_date_degraded']);  // 审核 #003 A2
 ```
 
 > 每个枚举 **必须**在迁移 SQL 里有对应 CHECK,值列表逐字相同 —— `ci:deps` 的 B2 会逐条比对。
@@ -44,7 +44,7 @@ export const EventTimeSource = z.enum(['sampled_on','reported_on','capture_date'
 | `normalization_confirm` | 确认/否决归一或归组提议 | `kind`、`input_fingerprint`、`decision`(`confirmed\|rejected`)、`payload` |
 | `document_archive` | 软删除 / 撤销归档 | `document_short_id`、`archived`(bool)、`reason` |
 
-另有既有的文档边界事件三个,**必须**一并注册:`document_split`、`document_merge`、`document_move_page`。
+另有文档边界事件三个(**同为新增**,此前并不存在),**必须**一并注册:`document_split`、`document_merge`、`document_move_page`。
 
 规范性条文:
 
@@ -58,12 +58,14 @@ export const EventTimeSource = z.enum(['sampled_on','reported_on','capture_date'
 |---|---|---|---|
 | `document` | `doc_type_confidence` | `real` | 可空 |
 | `document` | `sampled_on` / `reported_on` | `date` | 可空 |
+| `document` | `event_at` | `timestamptz` | 可空;报告确实印有时分时才填(审核 #003 A2) |
 | `document` | `department_raw` | `text` | 可空 |
 | `document` | `person_check` | `text` | CHECK ∈ `PersonCheck`,默认 `'unknown'` |
 | `document` | `archived_at` | `timestamptz` | 可空 |
 | `document` | `s1_artifact_key` / `s1_prompt_version` | `text` / `integer` | 可空 |
 | `document_page` | — | — | 无变更 |
 | `encounter` | `event_time_source` | `text` | CHECK ∈ `EventTimeSource` |
+| `ai_job` | `dedup_key` | `text NOT NULL` | 唯一;见 [04](./04-jobs.md) §2(审核 #003 A5) |
 | 新表 | `ai_job` | — | 见 [04](./04-jobs.md) §2 |
 | 新表 | `normalization_decision` | — | 见 [05](./05-reconciliation.md) §2.3 |
 
