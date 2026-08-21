@@ -6,8 +6,10 @@ import Anthropic from '@anthropic-ai/sdk';
 // 且同一输入两次运行结果可能不同。所以调用必须可替换为录制回放。
 // 默认实现是真实 SDK;测试用 setTransport 换掉。
 
-export type BetaMessageCreateParams = Parameters<Anthropic['beta']['messages']['create']>[0];
-export type BetaMessage = Awaited<ReturnType<Anthropic['beta']['messages']['create']>>;
+// 用 SDK 的具体非流式类型:create 的重载签名包含 Stream<...>,
+// 从 Parameters/ReturnType 推出来的是联合类型,narrow 不掉。
+export type BetaMessageCreateParams = Anthropic.Beta.Messages.MessageCreateParamsNonStreaming;
+export type BetaMessage = Anthropic.Beta.Messages.BetaMessage;
 
 export type Transport = (params: BetaMessageCreateParams) => Promise<BetaMessage>;
 
@@ -19,8 +21,7 @@ function realClient(): Anthropic {
   return client;
 }
 
-const realTransport: Transport = async (params) =>
-  (await realClient().beta.messages.create(params)) as BetaMessage;
+const realTransport: Transport = async (params) => realClient().beta.messages.create(params);
 
 let current: Transport = realTransport;
 

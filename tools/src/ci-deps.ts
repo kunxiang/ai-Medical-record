@@ -45,7 +45,7 @@ if (existsSync(webPkgPath)) {
 const aiPkgPath = path.join(root, 'packages/ai/package.json');
 if (existsSync(aiPkgPath)) {
   const aiDeps = Object.keys((JSON.parse(readFileSync(aiPkgPath, 'utf-8')).dependencies ?? {}) as Record<string, string>);
-  const allowed = new Set(['@amr/contracts', '@anthropic-ai/sdk', 'zod']);
+  const allowed = new Set(['@amr/contracts', '@anthropic-ai/sdk', 'zod', 'zod-to-json-schema']);
   const bad = aiDeps.filter((d) => !allowed.has(d));
   if (bad.length) failures.push(`m2 B1: packages/ai 依赖越界: ${bad.join(',')}`);
   const aiImports = grep("from '@amr/(api|storage)", path.join(root, 'packages/ai/src'));

@@ -18,7 +18,7 @@ const res = await client.beta.messages.create({
   model: MODEL,                    // 'claude-opus-5'
   max_tokens: 16000,
   output_config: {
-    format: zodOutputFormat(Stage1Out),   // 取其返回值作为 format,不用 parse() 的便利
+    format: betaZodOutputFormat(Stage1Out),   // beta 命名空间的助手名带 beta 前缀
     effort: 'medium',
   },
   system: [{ type: 'text', text: prompt.text, cache_control: { type: 'ephemeral' } }],
@@ -32,7 +32,10 @@ const parsed = Stage1Out.parse(JSON.parse(textOf(res.content)));
 
 规范性条文:
 
-1. **必须**用 `client.beta.messages.create()` 配合 `output_config.format`(值由 `zodOutputFormat(Stage1Out)` 生成)。**禁止**使用已废弃的顶层 `output_format` 参数。**禁止**使用 `client.messages.parse()` —— 它在非 beta 命名空间,与 `fallbacks` 不可共存(审核 #003 A1)。返回内容**必须**再经 `Stage1Out.parse()` 校验;校验失败按 §5.4 处理。
+1. **必须**用 `client.beta.messages.create()` 配合 `output_config.format`(值由 **`betaZodOutputFormat`**(`@anthropic-ai/sdk/helpers/beta/zod`)生成 —— beta 命名空间的助手名带 `beta` 前缀)。**禁止**使用已废弃的顶层 `output_format` 参数。返回内容**必须**再经 `Stage1Out.parse()` 校验;校验失败按 §5.4 处理。
+
+   > **为什么不用 `client.beta.messages.parse()`** —— 它确实存在,也确实能与 `betas`/`fallbacks` 共存(实现期核实,修正了审核 #003 A1 中"非 beta 命名空间"的表述):因为**注入点必须落在 wire 边界上**([99](./99-acceptance.md) §0)。`parse()` 在 SDK 内部做了一层客户端解析,把注入点放在它之上,录制盒里存的就不再是 API 的原始响应,而是 SDK 加工过的产物 —— 那样的回放证明不了"我们对真实响应的处理是对的"。用 `create()` + 自行 `Stage1Out.parse()`,录制盒 = 原始响应,回放才是诚实的。
+   > 代价是放弃 `parsed_output` 的类型便利。这个代价换的是验收资产的可信度,值。
 2. **禁止**传 `thinking` 的 `budget_tokens`(Opus 5 上返回 400)。**禁止**显式 `{type:'disabled'}`。省略 `thinking` 即为 adaptive,这是本项目要的行为。
 3. `output_config.effort` **必须**为 `'medium'`。理由:S1 是抄写与分类任务,不是推理任务;更高档位只增加成本与延迟。
 4. `max_tokens` **必须** ≥ 16000(`full_text` 可能很长);若单页 `stop_reason === 'max_tokens'`,按 [04](./04-jobs.md) §4 记为可重试失败并以 32000 重试一次。
