@@ -15,15 +15,16 @@
 
 **目标:能把一张照片安全地存进去,并且五年后还能读。**
 
-- [ ] Monorepo 骨架(`apps/api`、`apps/web`、`packages/contracts`、`packages/storage`)
-- [ ] `packages/contracts` 首版:person / document / encounter 类型与 Zod schema
-- [ ] PostgreSQL schema + Drizzle 迁移(见 [03 · 数据模型](./03-data-model.md))
-- [ ] S3 桶创建:**versioning + object lock 必须在建桶时开启**(事后无法补);**不设桶级默认保留期**,按 04 §1 矩阵逐对象上锁(ADR-045)
-- [ ] `_meta/` 自述层落桶:README(布局/回放规则/journal 事件注册表)+ schema 快照 + 注册表快照(ADR-045)
-- [ ] **最小上传链**(presign → 直传 → 登记;capture.json 随登记即写)与 **journal 双写机制**(M0 事件:person_update)—— spec 审核 #001 裁决:M0 验收句要求上传,D1 原则要求 journal 随建档同批(见 specs/m0/)
-- [ ] `packages/storage`:key 生成/解析 + sidecar 序列化 + 往返测试
-- [ ] 账号认证 + `person_access` 授权中间件(**从第一天起所有查询都过这一层**)
-- [ ] 建档 API
+- [x] Monorepo 骨架(`apps/api`、`apps/web`、`packages/contracts`、`packages/storage`)
+- [x] `packages/contracts` 首版:person / document / encounter 类型与 Zod schema
+- [x] PostgreSQL schema + Drizzle 迁移(见 [03 · 数据模型](./03-data-model.md))
+- [x] S3 桶创建:**versioning + object lock 必须在建桶时开启**(事后无法补);**不设桶级默认保留期**,按 04 §1 矩阵逐对象上锁(ADR-045)
+- [x] `_meta/` 自述层落桶:README(布局/回放规则/journal 事件注册表)+ schema 快照 + 注册表快照(ADR-045)
+- [x] **最小上传链**(presign → 直传 → 登记;capture.json 随登记即写)与 **journal 双写机制**(M0 事件:person_update)—— spec 审核 #001 裁决:M0 验收句要求上传,D1 原则要求 journal 随建档同批(见 specs/m0/)
+- [x] `packages/storage`:key 生成/解析 + sidecar 序列化 + 往返测试
+- [x] 账号认证 + `person_access` 授权中间件(**从第一天起所有查询都过这一层**)
+- [x] 建档 API
+- [x] PWA 家庭成员建档入口（补录于 2026-08-26；创建后写入精简缓存并自动切换）
 
 **验收:** 用 curl 建一个 person,上传一张图,能在 S3 里用 `rclone ls` 看到人类可读的路径与 sidecar。
 
@@ -33,15 +34,16 @@
 
 **目标:拍照 → 入库,弱网可用。这一步做完,系统就已经有价值了。**
 
-- [ ] PWA 侧接入 M0 既有上传链(presign 直传 + `POST /documents` 幂等键)
-- [ ] PWA:拍照(含连拍模式)、PDF/截图/相册导入
-- [ ] **IndexedDB 离线队列 + 前台驱动重试**(ADR-046:iOS 无 Background Sync;SW 只做外壳预缓存)
-- [ ] 采集端 EXIF 读取(`DateTimeOriginal` → `captured_at`;`Orientation` 落 page sidecar)—— 存量旧单据的归档日期正确性依赖它
-- [ ] CORS(API 侧 + 桶侧,M0 挂账)、**D11 权限审计落点**、**D12 token 吊销**(到期债)
-- [ ] 上传队列状态 UI(「3 张待上传」)
-- [ ] journal 双写扩展到 M1 新增的人工输入(机制已在 M0 落地;此后每个产生人工输入的功能都必须接入,ADR-045 / D1)
-- [ ] 缩略图 / 预览图生成
-- [ ] 文档浏览:按人 → 时间轴 → 文档(只读;**软删除移至 M2**,与归人纠正、文档拆分同批)
+- [x] PWA 侧接入 M0 既有上传链(presign 直传 + `POST /documents` 幂等键)
+- [x] PWA:拍照(含连拍模式)、PDF/截图/相册导入
+- [x] **IndexedDB 离线队列 + 前台驱动重试**(ADR-046:iOS 无 Background Sync;SW 只做外壳预缓存)
+- [x] 采集端 EXIF 读取(`DateTimeOriginal` → `captured_at`;`Orientation` 落 page sidecar)—— 存量旧单据的归档日期正确性依赖它
+- [x] CORS(API 侧 + 桶侧,M0 挂账)、**D11 权限审计落点**、**D12 token 吊销**(到期债)
+- [x] 上传队列状态 UI(「3 张待上传」)
+- [x] 家庭成员选择与新增（复用 M0 建档 API）
+- [x] journal 双写扩展到 M1 新增的人工输入(机制已在 M0 落地;此后每个产生人工输入的功能都必须接入,ADR-045 / D1)
+- [x] 缩略图 / 预览图生成
+- [x] 文档浏览:按人 → 时间轴 → 文档(只读;**软删除移至 M2**,与归人纠正、文档拆分同批)
 
 **验收:** 飞行模式下拍 5 张 → 恢复网络 → 全部上传成功,一张不丢。
 

@@ -1,12 +1,19 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { S1Artifact, Stage1Out, type Stage1OutT } from '@amr/contracts';
-import { MAX_IMAGES_PER_REQUEST, S1Error, assertBatchPages, callS1, getPrompt, mergeBatches, planBatches, S1_PROMPT_ID, type S1PageInput } from '@amr/ai';
+import {
+  S1Error, assertBatchPages, callS1, callS1Pdf, getPrompt,
+  mergeBatches, planBatches, S1_PROMPT_ID, type S1PageInput,
+} from '@amr/ai';
 import { buildKey, canonicalJson, serverTimestamp } from '@amr/storage';
 import { db } from '../db/client.js';
 import { document, documentPage, person } from '../db/schema.js';
 import { ensureDerivative } from '../derivatives.js';
-import { getObjectText, presignGetKey, putWorm } from '../s3.js';
+import { getObjectBytes, getObjectText, presignGetKey, putWorm } from '../s3.js';
 import { normalizeName, personCheckOf } from '../person-check.js';
+import {
+  assertPdfPageLimit, MAX_PDF_BYTES, pdfPageCount, PdfStage1Error,
+} from '../pdf-stage1.js';
+import { scheduleFacilityNormalization } from '../normalization/facility-service.js';
 import type { JobFailure } from './queue.js';
 
 // spec m2-03。S1:分类 + 元数据 + 全文提取。
@@ -20,7 +27,7 @@ export class Stage1Failure extends Error {
 interface DocContext {
   documentId: string; shortId: string; personId: string; personSlug: string;
   displayName: string; namePinyin: string | null;
-  pages: Array<{ pageNo: number; storageKey: string; mimeType: string }>;
+  pages: Array<{ pageNo: number; storageKey: string; mimeType: string; byteSize: number }>;
 }
 
 async function loadContext(documentId: string): Promise<DocContext | null> {
@@ -28,7 +35,8 @@ async function loadContext(documentId: string): Promise<DocContext | null> {
     .select({
       documentId: document.id, shortId: document.shortId, personId: document.personId,
       personSlug: person.slug, displayName: person.displayName, namePinyin: person.namePinyin,
-      pageNo: documentPage.pageNo, storageKey: documentPage.storageKey, mimeType: documentPage.mimeType,
+      pageNo: documentPage.pageNo, storageKey: documentPage.storageKey,
+      mimeType: documentPage.mimeType, byteSize: documentPage.byteSize,
     })
     .from(documentPage)
     .innerJoin(document, eq(document.id, documentPage.documentId))
@@ -40,7 +48,9 @@ async function loadContext(documentId: string): Promise<DocContext | null> {
   return {
     documentId: first.documentId, shortId: first.shortId, personId: first.personId,
     personSlug: first.personSlug, displayName: first.displayName, namePinyin: first.namePinyin,
-    pages: rows.map((r) => ({ pageNo: r.pageNo, storageKey: r.storageKey, mimeType: r.mimeType })),
+    pages: rows.map((r) => ({
+      pageNo: r.pageNo, storageKey: r.storageKey, mimeType: r.mimeType, byteSize: r.byteSize,
+    })),
   };
 }
 
@@ -80,13 +90,33 @@ async function runS1(images: S1PageInput[]): Promise<{ output: Stage1OutT; model
   };
 }
 
+async function runPdfS1(bytes: Buffer, pageCount: number): Promise<{
+  output: Stage1OutT;
+  model: string;
+  usage: Record<string, number>;
+  batches: number;
+  promptVersion: number;
+  promptSha256: string;
+}> {
+  const result = await callS1Pdf({ data: bytes.toString('base64'), pageCount });
+  return { ...result, batches: 1 };
+}
+
 export async function handleStage1(documentId: string): Promise<{ resultKey: string }> {
   const ctx = await loadContext(documentId);
   if (!ctx) throw new Stage1Failure('failed', { stage: 'load', code: 'document_not_found', message: `文档不存在: ${documentId}` });
 
-  // PDF 走 document 块(m2-02 §3.5);M2 暂不实现,记 unsupported 而不是静默跳过
-  if (ctx.pages.some((p) => p.mimeType === 'application/pdf')) {
-    throw new Stage1Failure('unsupported', { stage: 's1', code: 'pdf_not_supported', message: 'PDF 的 document 块路径待实现' });
+  const pdfPages = ctx.pages.filter((page) => page.mimeType === 'application/pdf');
+  if (pdfPages.length > 0 && (pdfPages.length !== 1 || ctx.pages.length !== 1)) {
+    throw new Stage1Failure('unsupported', {
+      stage: 's1', code: 'mixed_pdf_document', message: 'PDF 必须作为文档中唯一的 L1 页面对象',
+    });
+  }
+  const pdfPage = pdfPages[0] ?? null;
+  if (pdfPage && pdfPage.byteSize > MAX_PDF_BYTES) {
+    throw new Stage1Failure('unsupported', {
+      stage: 's1', code: 'pdf_too_large', message: 'PDF 超过 32 MiB 上限',
+    });
   }
 
   const prompt = getPrompt(S1_PROMPT_ID);
@@ -101,11 +131,38 @@ export async function handleStage1(documentId: string): Promise<{ resultKey: str
   if (existing) {
     artifact = S1Artifact.parse(JSON.parse(existing.text));
   } else {
-    const images = await prepareImages(ctx);
     let ran;
     try {
-      ran = await runS1(images);
+      if (pdfPage) {
+        const bytes = await getObjectBytes(pdfPage.storageKey);
+        if (!bytes) {
+          throw new Stage1Failure('failed', {
+            stage: 'load', code: 'pdf_object_missing', message: 'PDF 原件不存在',
+          });
+        }
+        if (bytes.length !== pdfPage.byteSize) {
+          throw new Stage1Failure('failed', {
+            stage: 'load', code: 'pdf_size_mismatch', message: 'PDF 原件大小与登记值不一致',
+          });
+        }
+        let pageCount: number;
+        try {
+          pageCount = await pdfPageCount(bytes);
+          assertPdfPageLimit(pageCount);
+        } catch (error) {
+          if (error instanceof PdfStage1Error) {
+            throw new Stage1Failure('unsupported', {
+              stage: 's1', code: error.code, message: error.message,
+            });
+          }
+          throw error;
+        }
+        ran = await runPdfS1(bytes, pageCount);
+      } else {
+        ran = await runS1(await prepareImages(ctx));
+      }
     } catch (e: unknown) {
+      if (e instanceof Stage1Failure) throw e;
       if (e instanceof S1Error) {
         const f = e.failure;
         if (f.kind === 'refusal') {
@@ -131,25 +188,35 @@ export async function handleStage1(documentId: string): Promise<{ resultKey: str
   // 归人对账:确定性比对,**禁止**改 person_id,**禁止**写任何 L1 人工层列(m2-05 §1)
   const check = personCheckOf(out.patient_name, ctx.displayName, ctx.namePinyin);
 
-  await db
-    .update(document)
-    .set({
-      docType: out.doc_type,
-      docTypeConfidence: String(out.doc_type_confidence),
-      sampledOn: out.sampled_on,
-      reportedOn: out.reported_on,
-      eventTime: out.event_at ? new Date(out.event_at) : null,
-      // ★ S1 读到了报告上印的时分,但**不知道那是采集时刻还是报告时刻**。
-      //   而 event_time_source 存在的理由正是 docs/03 §239:"否则时间轴的精度无从判断"
-      //   —— 影像的报告时间晚于实际检查,化验的采集时刻就是事件本身。
-      //   在 S1 能分辨之前,如实写 s1_unspecified,而不是编一个看起来精确的值(设计债 D22)。
-      eventTimeSource: out.event_at ? 's1_unspecified' : null,
-      departmentRaw: out.department_raw,
-      personCheck: check,
-      s1ArtifactKey: artifactKey,
-      s1PromptVersion: artifact.prompt_version,
-    })
-    .where(eq(document.id, documentId));
+  await db.transaction(async (tx) => {
+    await tx
+      .update(document)
+      .set({
+        docType: out.doc_type,
+        docTypeConfidence: String(out.doc_type_confidence),
+        sampledOn: out.sampled_on,
+        reportedOn: out.reported_on,
+        eventTime: out.event_at ? new Date(out.event_at) : null,
+        // ★ S1 读到了报告上印的时分,但**不知道那是采集时刻还是报告时刻**。
+        //   而 event_time_source 存在的理由正是 docs/03 §239:"否则时间轴的精度无从判断"
+        //   —— 影像的报告时间晚于实际检查,化验的采集时刻就是事件本身。
+        //   在 S1 能分辨之前,如实写 s1_unspecified,而不是编一个看起来精确的值(设计债 D22)。
+        eventTimeSource: out.event_at ? 's1_unspecified' : null,
+        facilityNameRaw: out.facility_name_raw,
+        // facility_id 与机构原文同属 L2。S1 重跑读出不同原文时，旧归一结果不能继续挂在文档上；
+        // facility handler 会按新指纹从缓存或提议中确定性回填。
+        facilityId: null,
+        departmentRaw: out.department_raw,
+        personCheck: check,
+        s1ArtifactKey: artifactKey,
+        s1PromptVersion: artifact.prompt_version,
+      })
+      .where(eq(document.id, documentId));
+
+    if (out.facility_name_raw !== null) {
+      await scheduleFacilityNormalization(tx, out.facility_name_raw);
+    }
+  });
 
   return { resultKey: artifactKey };
 }

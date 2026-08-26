@@ -5,10 +5,13 @@ import { env } from './env.js';
 import { initSharp } from './derivatives.js';
 import { startWorker } from './jobs/worker.js';
 import { registerAiRoutes } from './routes/ai.js';
+import { registerNormalizationRoutes } from './routes/normalization.js';
 import { registerBrowseRoutes } from './routes/browse.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerPeopleRoutes } from './routes/people.js';
 import { registerDocumentRoutes } from './routes/documents.js';
+import { registerCorrectionRoutes } from './routes/corrections.js';
+import { registerMultipartRoutes } from './routes/multipart.js';
 import { armCrashPoint, InjectedCrash } from './test-hooks.js';
 
 export function buildServer(): FastifyInstance {
@@ -60,7 +63,10 @@ export function buildServer(): FastifyInstance {
   registerAuthRoutes(app);
   registerPeopleRoutes(app);
   registerDocumentRoutes(app);
+  registerCorrectionRoutes(app);
+  registerMultipartRoutes(app);
   registerBrowseRoutes(app);
   registerAiRoutes(app);
+  registerNormalizationRoutes(app);
   return app;
 }

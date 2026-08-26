@@ -25,12 +25,13 @@ describe('prompt 完整性(m2-99 B4)', () => {
     const all = loadPrompts();
     expect(all.size).toBeGreaterThan(0);
     const p = getPrompt('s1-classify');
-    expect(p.version).toBe(1);
+    expect(p.version).toBe(2);
     expect(p.text).toContain('只抄写');
   });
 
   it('省略版本号时取最高版本', () => {
-    expect(getPrompt('s1-classify').version).toBe(getPrompt('s1-classify', 1).version);
+    expect(getPrompt('s1-classify').version).toBe(2);
+    expect(getPrompt('s1-classify', 1).version).toBe(1);
   });
 
   it('未注册的 prompt 抛错', () => {

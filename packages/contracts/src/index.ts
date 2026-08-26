@@ -11,6 +11,7 @@ export * from './auth.js';
 export * from './ai.js';
 export * from './jobs.js';
 export * from './normalization.js';
+export * from './multipart.js';
 export * from './corrections.js';
 
 export const SCHEMA_VERSIONS = {
@@ -19,5 +20,6 @@ export const SCHEMA_VERSIONS = {
   person: '1.0',
   journal: '1.0',
   manifest: '1.0',
-  correction: '1.0',
+  correction: '1.1',
+  decision: '1.0',
 } as const;

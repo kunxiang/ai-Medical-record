@@ -2,8 +2,9 @@
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import {
-  CaptureSidecar, CorrectionSidecar, DocType, JOURNAL_EVENT_REGISTRY, JournalEvent,
-  ManifestLine, MimeType, PageSidecar, PersonSidecar, SCHEMA_VERSIONS, SLUG_ALPHABET,
+  CaptureSidecar, CorrectionSidecar, DECISION_OP_REGISTRY, DecisionLine, DocType,
+  JOURNAL_EVENT_REGISTRY, JournalEvent, ManifestLine, MimeType, PageSidecar, PersonSidecar,
+  SCHEMA_VERSIONS, SLUG_ALPHABET,
 } from '@amr/contracts';
 import { canonicalJson } from '@amr/storage';
 import { adminClient, BUCKET } from './s3-admin.js';
@@ -20,6 +21,7 @@ const schemas: Array<[string, unknown]> = [
   [`_meta/schemas/${SCHEMA_VERSIONS.journal}/journal.json`, zodToJsonSchema(JournalEvent)],
   [`_meta/schemas/${SCHEMA_VERSIONS.manifest}/manifest.json`, zodToJsonSchema(ManifestLine)],
   [`_meta/schemas/${SCHEMA_VERSIONS.correction}/correction.json`, zodToJsonSchema(CorrectionSidecar)],
+  [`_meta/schemas/${SCHEMA_VERSIONS.decision}/decision.json`, zodToJsonSchema(DecisionLine)],
 ];
 for (const [key, schema] of schemas) await put(key, canonicalJson(schema), 'application/json');
 
@@ -31,6 +33,7 @@ await put(
     generated_on: today,
     doc_types: DocType.options,
     journal_events: JOURNAL_EVENT_REGISTRY,
+    decision_ops: DECISION_OP_REGISTRY,
     slug_alphabet: SLUG_ALPHABET,
     mime_whitelist: MimeType.options,
     schema_versions: SCHEMA_VERSIONS,
@@ -48,6 +51,7 @@ const readme = `# 医疗档案桶 · 自述(_meta/README.md)
   只含上传瞬间已知的事实,没有任何 AI 观点)+ 人工层 journal + _person.json 全量快照。
 - \`derived/\` —— L2 派生:AI 提取、转写、缩略图、视图。**全部可再生,可整体丢弃重建。**
 - \`_index/manifests/*.jsonl\` —— 档案事实事件流(add / person_correct),数据库全丢时的重建入口。
+- \`_index/decisions/*.jsonl\` —— 不绑人的人工确认结果(normalization_confirm),数据库全丢时必须回放。
 - \`_index/people.json\` —— slug → 姓名 映射。
 - \`_meta/schemas/\` —— 各 JSON 文件的 JSON Schema 快照,按 schema_version 分目录。
 - \`_incoming/\`、\`_probe/\` —— 暂存与自检,非档案,打包时不带。
@@ -63,6 +67,10 @@ const readme = `# 医疗档案桶 · 自述(_meta/README.md)
 ## journal 事件注册表
 
 ${JOURNAL_EVENT_REGISTRY.map((e) => `- \`${e}\``).join('\n')}
+
+## decisions 操作注册表
+
+${DECISION_OP_REGISTRY.map((op) => `- \`${op}\``).join('\n')}
 
 ## 校验
 

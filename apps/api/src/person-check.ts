@@ -1,4 +1,4 @@
-import type { PersonCheckT } from '@amr/contracts';
+import { normalizeIdentity, type PersonCheckT } from '@amr/contracts';
 
 // spec m2-05 §1:归人对账。**禁止**因比对结果修改 document.person_id —— 一次也不行。
 // "归人从不静默默认"是 M2 的验收句之一(ADR-041)。
@@ -6,11 +6,8 @@ import type { PersonCheckT } from '@amr/contracts';
 /** m2-05 §1.3 定死的归一:NFKC → 小写 → 删空白 → 删逐字列出的分隔符。
  *  "去除常见分隔符"是散文不是字母表:折不折叠大小写直接决定 `ZHANG WEI` vs `Zhang Wei`
  *  是否 mismatch,`·` 收不收直接决定 `阿依古丽·买买提` 的归属(审核 #004 B-1)。 */
-const SEPARATORS = ['·', '‧', '•', '・', '.', '。', ',', ',', '、', '-', '‐', '‑', '‒', '–', '—', '_', '/', '\\'];
-const SEP_RE = new RegExp(`[${SEPARATORS.map((c) => '\\' + c).join('')}]`, 'g');
-
 export function normalizeName(s: string): string {
-  return s.normalize('NFKC').toLowerCase().replace(/\p{White_Space}/gu, '').replace(SEP_RE, '');
+  return normalizeIdentity(s);
 }
 
 /**

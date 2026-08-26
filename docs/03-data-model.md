@@ -155,7 +155,7 @@ encounter(就诊)
 
 ### `document` — 逻辑文档
 
-⚠️ **写入后除 `encounter_id` 外不再修改。** 归人(`person_id`)在上传时强制确认,之后修改需走人工纠正流程并记入 `audit_log`。
+⚠️ 原件与 L1 sidecar 写后不改；逻辑归属、页号和归档状态只能经带幂等键的人工纠正接口修改，并追加 correction/journal。
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -165,8 +165,8 @@ encounter(就诊)
 | `encounter_id` | uuid FK nullable | 可后补归组 |
 | `doc_type` | enum | 见下表 |
 | `doc_type_confidence` | numeric | AI 判定置信度 |
-| `page_count` | int | |
-| `source` | enum(`camera`,`album`,`pdf`,`screenshot`,`scan`,`import`) | |
+| `page_count` | int | ≥0；merge 后被吸收文档为 0 页并自动归档 |
+| `source` | enum(`camera`,`album`,`pdf`,`screenshot`,`scan`,`import`,`split`) | `split` 仅由服务端拆分接口产生 |
 | `original_filename` | text nullable | |
 | `captured_at` | timestamptz | 拍摄时间(EXIF 优先,否则上传时间) |
 | `capture_date` | date | **key 的日期段**(captured_at 按上传者时区折算,登记时写死;spec m0-02) |
@@ -178,6 +178,7 @@ encounter(就诊)
 | `event_time` | timestamptz nullable | **统一时间轴用的事件时刻** —— 见下方 ⚠️ |
 | `event_time_source` | text nullable | 该时刻取自哪个字段 |
 | `exam_items` | jsonb nullable | 检查项目 / 覆盖范围(影像专用)—— 见下方 ⚠️ |
+| `facility_name_raw` | text nullable | Stage 1 抄出的机构原文；L2 可重算，用于归一指纹与批量回填 |
 | `facility_id` | uuid FK nullable | 冗余自 encounter,便于直接筛选 |
 | `report_no` | text nullable | **报告编号** —— 见下方说明 |
 | `accession_no` | text nullable | 流水号 |
@@ -295,6 +296,21 @@ COVID 单没有「单位」与「检测仪器」列。**按固定列序解析必
 > ⚠️ **`page_no` 必须从页脚的「第 N 页,共 M 页」解析,不能等同于拍摄顺序。**
 > 真实场景中用户经常先拍到第 2 页(纸是折叠的、翻页顺序反了)。而多页报告的项目编号是**跨页连续**的(第 1 页 NO 1–20,第 2 页 NO 21–27),顺序错了会导致提取结果错乱。
 > `capture_order` 单独保留,用于排查上传问题。
+
+### `upload_batch` / `upload_file` / `multipart_upload` — 临时上传状态（L2）
+
+上传批次和 multipart 状态只用于把浏览器直传安全地收敛为一次文档登记，可由超时清理，不是病历 L1。
+
+| 表 / 字段 | 说明 |
+|---|---|
+| `upload_batch` | 24 小时批次；绑定 `person_id`、创建账户、`doc_short_id` 与最终消费文档 |
+| `upload_file` | 保存申报的文件名、MIME、字节数、SHA-256 和 `_incoming` key |
+| `upload_file.multipart_verified_at` | `>8 MiB` 文件在 S3 complete 后经 API GET 回流、整文件 SHA-256/字节数校验通过的时间；为空时禁止登记 |
+| `multipart_upload.id` | S3 返回的 opaque UploadId；同时作为 complete 幂等锚点 |
+| `multipart_upload.part_count` | 以固定 8 MiB part 计算的数量，范围 2–10000 |
+| `multipart_upload.state` | `pending | completed`；completed 行保存最终 SHA-256、字节数和完成时间 |
+
+浏览器在 IndexedDB 保存 UploadId 与已完成 `{part_number, etag}`；URL 不持久化为续传依据，恢复时只为缺失 part 重新签名。对象存储 1 天后终止未完成 multipart。
 
 ---
 
@@ -546,6 +562,10 @@ version 1 ─ round 1 ──校验失败──> round 2(裁剪区域重读)─�
 
 ### `normalization_decision`
 
+> M2 当前落地列名为 `kind / input_fingerprint / proposal / state / decided_by /
+> decided_at / client_operation_id / prompt_id / prompt_version / model / created_at`。
+> 本节下方的扩展型 `decision_type` 注册表属于后续里程碑目标，不应误当作当前迁移。
+
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `id` | uuid PK | |
@@ -578,6 +598,18 @@ version 1 ─ round 1 ──校验失败──> round 2(裁剪区域重读)─�
 1. **合并类必须人工确认。** 拆分可逆,合并有损 —— 把「红细胞比容计算值」(iSTAT)并进「红细胞比积」(血球仪)会抹掉 2.9% 的真实方法学差异。反例断言见 [用例 001](../fixtures/001-pediatric-emergency/);与之相对,[用例 004](../fixtures/004-influenza-visit/) 的双语行**必须**合并 —— 一对方向相反的断言钉住判断边界。
 2. **低置信不映射。** `concept_code` 置 null,原值照常入库,确认后重放补全。
 3. **已确认决策是人工层。** 不可从原件重建 → 追加导出到 S3 `_index/decisions/`,维持"数据库可从 S3 重建"不变式;其词表注册表快照随 `_meta/registries/` 落桶(ADR-045)—— decisions 离开代码仓库必须仍可解读。
+
+### `human_operation` — 人工写操作幂等缓存（L2）
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `id` | uuid PK | `client_operation_id` |
+| `kind` | text | archive / person_check_ack / person_reassign / boundary |
+| `document_id` | uuid FK | 操作入口文档 |
+| `request` / `result` | jsonb | 首次请求与响应，用于弱网重试一致性校验 |
+| `created_at` | timestamptz | |
+
+该表不是人工事实的权威存储；权威事实仍在 journal、audit、manifest、correction 和 decisions。删库回放后可重建此幂等缓存。
 
 ---
 

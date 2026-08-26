@@ -39,7 +39,12 @@ export async function enqueue(
   if (args.kind === 'encounter_suggest') {
     await tx.insert(aiJob).values(values).onConflictDoUpdate({
       target: aiJob.dedupKey,
-      set: { nextAttemptAt: sql`now()`, updatedAt: sql`now()` },
+      // running 期间的新输入用 updated_at 标成 dirty；当前 worker 完成时会把它退回 pending。
+      // 非 running 终态则直接重新激活，避免 person 级唯一 job 永远停在 done。
+      set: {
+        state: sql`case when ${aiJob.state} = 'running' then 'running' else 'pending' end`,
+        nextAttemptAt: sql`now()`, updatedAt: sql`now()`,
+      },
     });
   } else {
     await tx.insert(aiJob).values(values).onConflictDoNothing({ target: aiJob.dedupKey });
@@ -51,6 +56,7 @@ export interface ClaimedJob {
   kind: AiJobKindT;
   documentId: string | null;
   personId: string | null;
+  dedupKey: string;
   attempt: number;
 }
 
@@ -76,7 +82,10 @@ export async function reclaimZombies(instance: string): Promise<number> {
 export async function claim(instance: string, limit: number): Promise<ClaimedJob[]> {
   return db.transaction(async (tx) => {
     const picked = await tx
-      .select({ id: aiJob.id, kind: aiJob.kind, documentId: aiJob.documentId, personId: aiJob.personId, attempt: aiJob.attempt })
+      .select({
+        id: aiJob.id, kind: aiJob.kind, documentId: aiJob.documentId,
+        personId: aiJob.personId, dedupKey: aiJob.dedupKey, attempt: aiJob.attempt,
+      })
       .from(aiJob)
       .where(and(eq(aiJob.state, 'pending'), lt(aiJob.nextAttemptAt, new Date())))
       .orderBy(aiJob.nextAttemptAt)
@@ -107,7 +116,9 @@ export async function finish(
   await db
     .update(aiJob)
     .set({
-      state,
+      // encounter 合并作业运行期间可能又收到新文档。若 updated_at 晚于 claim 的 locked_at，
+      // 旧 worker 不得覆盖新触发信号，必须再跑一轮。
+      state: sql`case when ${aiJob.updatedAt} > ${aiJob.lockedAt} then 'pending' else ${state} end`,
       resultKey: extra.resultKey ?? null,
       lastError: extra.error ? { ...extra.error, at: new Date().toISOString() } : null,
       lockedAt: null,

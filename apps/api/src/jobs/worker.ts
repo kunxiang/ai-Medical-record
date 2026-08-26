@@ -1,6 +1,8 @@
 import { env } from '../env.js';
 import { claim, finish, reclaimZombies, retryLater, type ClaimedJob } from './queue.js';
 import { handleStage1, Stage1Failure } from './stage1-handler.js';
+import { FacilityJobFailure, handleFacilityNormalize } from '../normalization/facility-service.js';
+import { EncounterJobFailure, handleEncounterSuggest } from '../normalization/encounter-service.js';
 
 // spec m2-04 §3。前台驱动之外的另一半:服务端轮询器。
 
@@ -26,14 +28,32 @@ async function runOne(job: ClaimedJob): Promise<void> {
       workerStats.processed += 1;
       return;
     }
-    // facility_normalize / encounter_suggest 尚未实现:记 needs_human 而不是静默跳过
-    // (m2-04 §5:禁止任何"失败就静默跳过"的路径)
-    await finish(job.id, 'needs_human', {
-      error: { stage: 'dispatch', code: 'handler_not_implemented', message: `${job.kind} 处理器待实现` },
-    });
+    if (job.kind === 'facility_normalize') {
+      await handleFacilityNormalize(job.dedupKey);
+      await finish(job.id, 'done');
+      workerStats.processed += 1;
+      return;
+    }
+    if (!job.personId) {
+      await finish(job.id, 'failed', {
+        error: { stage: 'claim', code: 'missing_person', message: 'encounter_suggest 作业缺 person_id' },
+      });
+      return;
+    }
+    await handleEncounterSuggest(job.personId);
+    await finish(job.id, 'done');
+    workerStats.processed += 1;
   } catch (e) {
     workerStats.failed += 1;
     if (e instanceof Stage1Failure && e.terminal) {
+      await finish(job.id, e.terminal, { error: e.detail });
+      return;
+    }
+    if (e instanceof FacilityJobFailure) {
+      await finish(job.id, e.terminal, { error: e.detail });
+      return;
+    }
+    if (e instanceof EncounterJobFailure) {
       await finish(job.id, e.terminal, { error: e.detail });
       return;
     }

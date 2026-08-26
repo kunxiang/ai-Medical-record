@@ -13,6 +13,20 @@ export const ArchiveRequest = z.object({
   reason: z.string().min(1).max(500),
   client_operation_id: Uuid,
 });
+export const ArchiveResponse = z.object({
+  document_id: Uuid,
+  archived: z.boolean(),
+  archived_at: z.string().datetime({ offset: true }).nullable(),
+});
+
+export const PersonCheckAckRequest = z.object({
+  reason: z.string().min(1).max(500),
+  client_operation_id: Uuid,
+});
+export const PersonCheckAckResponse = z.object({
+  document_id: Uuid,
+  person_check_ack_at: z.string().datetime({ offset: true }),
+});
 
 export const ReassignRequest = z.object({
   to_person_id: Uuid,

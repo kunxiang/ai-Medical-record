@@ -22,13 +22,27 @@ function realClient(): Anthropic {
 }
 
 const realTransport: Transport = async (params) => realClient().beta.messages.create(params);
+const realStreamTransport: Transport = async (params) =>
+  realClient().beta.messages.stream(params).finalMessage();
 
 let current: Transport = realTransport;
+let currentStream: Transport = realStreamTransport;
 
 export function setTransport(t: Transport | null): void {
   current = t ?? realTransport;
+  // 录制/回放注入必须同时覆盖普通与提额流式路径，否则 max_tokens 测试会意外访问真实网络。
+  currentStream = t ?? realStreamTransport;
 }
 
 export function getTransport(): Transport {
   return current;
+}
+
+export function getStreamTransport(): Transport {
+  return currentStream;
+}
+
+/** 仅供录制/回放和测试分别观察提额流式路径。 */
+export function setStreamTransport(t: Transport | null): void {
+  currentStream = t ?? realStreamTransport;
 }

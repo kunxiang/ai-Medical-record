@@ -1,6 +1,7 @@
 import {
-  CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand,
-  PutObjectCommand, S3Client, S3ServiceException,
+  CompleteMultipartUploadCommand, CopyObjectCommand, CreateMultipartUploadCommand,
+  DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command,
+  PutObjectCommand, S3Client, S3ServiceException, UploadPartCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { env, LOCK_RETENTION_YEARS, PROBE_RETENTION_MS } from './env.js';
@@ -90,6 +91,19 @@ export async function getObjectText(key: string): Promise<{ text: string; etag: 
   }
 }
 
+export async function listKeys(prefix: string): Promise<string[]> {
+  const keys: string[] = [];
+  let continuationToken: string | undefined;
+  do {
+    const result = await s3.send(new ListObjectsV2Command({
+      Bucket: B, Prefix: prefix, ...(continuationToken ? { ContinuationToken: continuationToken } : {}),
+    }));
+    for (const item of result.Contents ?? []) if (item.Key) keys.push(item.Key);
+    continuationToken = result.IsTruncated ? result.NextContinuationToken : undefined;
+  } while (continuationToken);
+  return keys;
+}
+
 /** 追加型 JSONL:读-改-写 + 条件写(If-Match/If-None-Match),412 重试 ≤3(spec m0-03 §5.4)。
  *  并发主锁是 pg advisory lock(调用方持有);这里是 S3 层防御。
  *  每个版本 GOVERNANCE 上锁(spec m0-04 §2)。 */
@@ -158,6 +172,16 @@ export async function deleteObjectIfPossible(key: string): Promise<void> {
   }
 }
 
+/** 删除可重算的 L2 前缀。与临时上传清理不同，这里失败必须上抛：
+ * 页面重排后继续命中旧 preview 会静默展示错误内容。DeleteObject 本身幂等。 */
+export async function deletePrefix(prefix: string): Promise<number> {
+  const keys = await listKeys(prefix);
+  for (const key of keys) {
+    await s3.send(new DeleteObjectCommand({ Bucket: B, Key: key }));
+  }
+  return keys.length;
+}
+
 /** L2 派生物:普通 PUT,**严禁上锁**(04 §1 权威矩阵)。 */
 export async function putDerivative(key: string, body: Buffer): Promise<void> {
   await s3.send(new PutObjectCommand({ Bucket: B, Key: key, Body: body, ContentType: 'image/webp' }));
@@ -186,6 +210,37 @@ export async function presignPut(key: string, contentType: string, sha256Base64:
     unhoistableHeaders: new Set(['x-amz-checksum-sha256']),
   });
   return { url, headers: { 'Content-Type': contentType, 'x-amz-checksum-sha256': sha256Base64 } };
+}
+
+export async function createMultipartUpload(key: string, contentType: string): Promise<string> {
+  const result = await s3.send(new CreateMultipartUploadCommand({
+    Bucket: B, Key: key, ContentType: contentType,
+  }));
+  if (!result.UploadId) throw new Error('S3 未返回 multipart UploadId');
+  return result.UploadId;
+}
+
+export async function presignMultipartPart(
+  key: string,
+  uploadId: string,
+  partNumber: number,
+): Promise<string> {
+  return getSignedUrl(publicS3, new UploadPartCommand({
+    Bucket: B, Key: key, UploadId: uploadId, PartNumber: partNumber,
+  }), { expiresIn: 900 });
+}
+
+export async function completeMultipartUpload(
+  key: string,
+  uploadId: string,
+  parts: Array<{ partNumber: number; etag: string }>,
+): Promise<void> {
+  await s3.send(new CompleteMultipartUploadCommand({
+    Bucket: B, Key: key, UploadId: uploadId,
+    MultipartUpload: {
+      Parts: parts.map((part) => ({ PartNumber: part.partNumber, ETag: part.etag })),
+    },
+  }));
 }
 
 export async function presignGet(key: string): Promise<string> {

@@ -27,7 +27,23 @@ export interface CaptureRecord {
   last_error: { stage: 'presign' | 'put' | 'register'; code: string; message: string; at: string } | null;
   batch: {
     batch_id: string;
-    uploads: Array<{ page_no: number; upload_id: string; url: string; headers: Record<string, string>; expires_at: string }>;
+    uploads: Array<{
+      page_no: number;
+      upload_id: string;             // upload_file.id，登记时继续使用
+      mode: 'single' | 'multipart';
+      url: string | null;
+      headers: Record<string, string>;
+      expires_at: string | null;
+      single_completed?: boolean;
+      multipart?: {
+        upload_id: string;           // S3 opaque UploadId
+        key: string;
+        part_size: number;
+        part_count: number;
+        parts: Array<{ part_number: number; etag: string }>;
+        completed: boolean;
+      };
+    }>;
   } | null;
   discard_event_id: string | null;
   created_at: string;
@@ -136,8 +152,8 @@ export async function blobsOf(id: string, pageCount: number): Promise<BlobRecord
   return out;
 }
 
-/** 崩溃恢复(m1-04 §2.6):uploading/registering 一律回退为 pending;
- *  draft / pending_person / failed_terminal / pending_discard 保持不动。 */
+/** 崩溃恢复:uploading/registering 回退 pending。multipart 的 UploadId 与已完成 ETag
+ * 必须保留；否则刷新会把真正的断点续传退化成整文件重传。 */
 export async function recoverAfterRestart(): Promise<number> {
   const d = await db();
   const tx = d.transaction('captures', 'readwrite');
@@ -145,7 +161,10 @@ export async function recoverAfterRestart(): Promise<number> {
   for await (const cursor of tx.store) {
     const rec = cursor.value;
     if (rec.state === 'uploading' || rec.state === 'registering') {
-      await cursor.update({ ...rec, state: 'pending', batch: null, next_attempt_at: 0 });
+      const resumable = rec.batch?.uploads.some((upload) => upload.multipart) ?? false;
+      await cursor.update({
+        ...rec, state: 'pending', batch: resumable ? rec.batch : null, next_attempt_at: 0,
+      });
       n += 1;
     }
   }

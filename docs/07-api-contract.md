@@ -114,12 +114,25 @@ DELETE /api/v1/people/:id/identifiers/:iid
 
 ## 3. 上传与归档
 
-### 三步走
+> M2 当前实现补充：`PATCH /api/v1/documents/:id` 负责归档/恢复；
+> `POST /api/v1/documents/:id/person-check/ack` 确认归人告警；
+> `POST /api/v1/documents/:id/reassign` 纠正归属；
+> `POST /api/v1/documents/:id/split` 从指定页拆出新文档；
+> `POST /api/v1/documents/:id/merge` 吸收另一文档全部页面；
+> `POST /api/v1/documents/:id/move-page` 把单页移到同一人员的另一文档尾部；
+> `GET /api/v1/normalization-decisions` 与 `POST /api/v1/normalization-decisions/:id/confirm`
+> 负责机构归一和就诊归组建议的人工审核。上述写操作均要求 `client_operation_id`。
+
+边界接口只改变 PostgreSQL 中的逻辑归属与连续页号，不复制或移动 L1 原件；merge 后被吸收文档
+保留为 0 页软归档记录。目标文档必须属于同一家庭人员，归档文档不能参与边界调整。
+
+### 上传与登记
 
 ```
-① POST /uploads/presign     取预签名 URL
-② PUT  <presigned_url>       前端直传 S3(不过后端)
-③ POST /documents            登记文档 + 归人确认
+① POST /uploads/presign      建立批次并选择 single / multipart
+②a ≤8 MiB: PUT <presigned_url>
+②b >8 MiB: multipart create → sign → PUT parts → complete
+③ POST /documents             登记文档 + 归人确认
 ```
 
 ### `POST /api/v1/uploads/presign`
@@ -127,6 +140,7 @@ DELETE /api/v1/people/:id/identifiers/:iid
 ```json
 // 请求
 {
+  "person_id": "01990f89-5000-7000-8000-000000000001",
   "files": [
     { "filename": "IMG_0042.jpg", "mime_type": "image/jpeg", "byte_size": 2481920, "sha256": "a3f…" }
   ]
@@ -136,6 +150,7 @@ DELETE /api/v1/people/:id/identifiers/:iid
   "uploads": [
     {
       "upload_id": "u_9k2m",
+      "mode": "single",
       "url": "https://…",
       "method": "PUT",
       "headers": { "Content-Type": "image/jpeg" },
@@ -144,6 +159,47 @@ DELETE /api/v1/people/:id/identifiers/:iid
   ]
 }
 ```
+
+单文件 `≤8 MiB` 返回 `mode="single"`、有效 `url` 与 `expires_at`。单文件 `>8 MiB`
+返回 `mode="multipart"`、`url=null`、`expires_at=null`，因此旧客户端也不能用单 PUT 绕过分片。
+单文件硬上限仍为 50 MiB。
+
+### `POST /api/v1/uploads/multipart/create`
+
+请求 `{ "upload_file_id": "<presign 返回的 upload_id>" }`。仅接受 `>8 MiB` 文件，返回：
+
+```json
+{
+  "upload_id": "<S3 opaque UploadId>",
+  "key": "_incoming/<batch>/<file>",
+  "part_size": 8388608,
+  "part_count": 2
+}
+```
+
+### `POST /api/v1/uploads/multipart/sign`
+
+请求 `{ "upload_id": "…", "part_numbers": [1, 2] }`，批量返回 15 分钟有效的 part PUT URL。
+分片号不得重复或超出 create 返回的 `part_count`。浏览器必须读取每个 PUT 响应的 `ETag`；桶 CORS
+必须暴露 `ETag`。
+
+### `POST /api/v1/uploads/multipart/complete`
+
+```json
+{
+  "upload_id": "…",
+  "parts": [
+    { "part_number": 1, "etag": "\"etag-1\"" },
+    { "part_number": 2, "etag": "\"etag-2\"" }
+  ]
+}
+```
+
+parts 必须完整覆盖从 1 开始的连续序列。S3 合并后 API 会 GET 回流原始对象，重算整文件 SHA-256
+和字节数，再与 presign 时申报值比对；只有校验通过才写 `multipart_verified_at` 并允许
+`POST /documents` 登记。响应为 `{ "completed": true, "byte_size": 12582912, "sha256": "…" }`。
+若 S3 complete 已成功但响应或数据库落盘中断，重试会通过回读对象收敛为幂等成功；若 UploadId
+已被生命周期规则清理，则返回 `upload_incomplete`，客户端只重建该文件的 multipart。
 
 ### `POST /api/v1/documents`
 

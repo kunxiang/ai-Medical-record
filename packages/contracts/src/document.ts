@@ -22,10 +22,11 @@ export const PresignResponse = z.object({
   uploads: z.array(
     z.object({
       upload_id: Uuid,
-      url: z.string().url(),
+      mode: z.enum(['single', 'multipart']),
+      url: z.string().url().nullable(),
       method: z.literal('PUT'),
       headers: z.record(z.string()),
-      expires_at: IsoDateTime,
+      expires_at: IsoDateTime.nullable(),
     }),
   ),
 });
@@ -57,13 +58,14 @@ export function capturedAtInRange(capturedAt: string, now: Date): boolean {
 }
 
 export const ConfirmedBy = z.enum(['api', 'capture_ui', 'import']);
+const UploadDocumentSource = DocumentSource.exclude(['split']);
 
 export const DocumentCreate = z.object({
   person_id: Uuid,
   person_confirmed: z.literal(true),
   confirmed_by: ConfirmedBy.default('api'),   // PWA 一律传 capture_ui(ADR-041 的 L1 载体)
   batch_id: Uuid,
-  source: DocumentSource,
+  source: UploadDocumentSource,
   captured_at: IsoDateTime,
   pages: z
     .array(PageIn)

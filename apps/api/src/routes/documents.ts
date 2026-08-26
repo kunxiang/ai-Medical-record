@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   CaptureSidecar, DocumentCreate, DocumentOut, MAX_UPLOAD_BYTES, MIME_TO_EXT,
+  MULTIPART_THRESHOLD_BYTES,
   PageSidecar, PageUrlResponse, PresignRequest, PresignResponse, Uuid,
   capturedAtInRange, dedupKey, idempotencyFingerprint,
 } from '@amr/contracts';
@@ -22,12 +24,18 @@ import { ApiError, notFound } from '../errors.js';
 import { appendManifest } from '../journal.js';
 import { newId } from '../person-service.js';
 import {
-  copyWithLock, deleteObjectIfPossible, getObjectText, headObject, presignGet,
+  copyWithLock, deleteObjectIfPossible, getObjectBytes, getObjectText, headObject, presignGet,
   presignPut, putWorm,
 } from '../s3.js';
 import { crashPoint } from '../test-hooks.js';
 
 const hexToBase64 = (hex: string) => Buffer.from(hex, 'hex').toString('base64');
+
+async function objectMatchesSha256(key: string, expectedHex: string, byteSize: number): Promise<boolean> {
+  const bytes = await getObjectBytes(key);
+  return bytes !== null && bytes.length === byteSize
+    && createHash('sha256').update(bytes).digest('hex') === expectedHex;
+}
 
 export function registerDocumentRoutes(app: FastifyInstance): void {
   // ① presign(spec m0-06 §2.①)
@@ -64,9 +72,16 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
 
           const uploads = [];
           for (const f of files) {
+            if (f.byteSize > MULTIPART_THRESHOLD_BYTES) {
+              uploads.push({
+                upload_id: f.id, mode: 'multipart' as const, url: null,
+                method: 'PUT' as const, headers: {}, expires_at: null,
+              });
+              continue;
+            }
             const { url, headers } = await presignPut(f.incomingKey, f.mimeType, hexToBase64(f.sha256));
             uploads.push({
-              upload_id: f.id, url, method: 'PUT' as const, headers,
+              upload_id: f.id, mode: 'single' as const, url, method: 'PUT' as const, headers,
               expires_at: new Date(Date.now() + 900_000).toISOString(),
             });
           }
@@ -149,6 +164,10 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
       const staged: PageStaged[] = [];
       for (const p of input.pages) {
         const f = fileById.get(p.upload_id)!;
+        const isMultipart = f.byteSize > MULTIPART_THRESHOLD_BYTES;
+        if (isMultipart && f.multipartVerifiedAt === null) {
+          throw new ApiError('upload_incomplete', `页 ${p.page_no} 的 multipart 尚未完成整文件校验`);
+        }
         const mime = f.mimeType as Mime;
         const finalKey = buildKey.page({
           personSlug, captureDate, docShortId, pageNo: p.page_no, ext: MIME_TO_EXT[mime],
@@ -157,7 +176,9 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
         if (!incoming) {
           // 崩溃重试路径:临时缺失 → 回查最终 key(spec m0-06 §2.③.3)
           const final = await headObject(finalKey);
-          if (final && final.checksumSha256Base64 === hexToBase64(f.sha256)) {
+          if (final && (isMultipart
+            ? await objectMatchesSha256(finalKey, f.sha256, f.byteSize)
+            : final.checksumSha256Base64 === hexToBase64(f.sha256))) {
             staged.push({
               pageNo: p.page_no, captureOrder: p.capture_order, finalKey, mime, byteSize: final.byteSize,
               sha256: f.sha256, width: p.width, height: p.height,
@@ -173,7 +194,7 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
         if (incoming.contentType !== f.mimeType) {
           throw new ApiError('unsupported_media_type', `页 ${p.page_no} 实测 Content-Type 与登记不符`);
         }
-        if (incoming.checksumSha256Base64 !== hexToBase64(f.sha256)) {
+        if (!isMultipart && incoming.checksumSha256Base64 !== hexToBase64(f.sha256)) {
           throw new ApiError('sha256_mismatch', `页 ${p.page_no} 校验和不符`);
         }
         if (f.sha256 !== p.sha256) {
@@ -182,7 +203,9 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
 
         const final = await headObject(finalKey);
         if (final) {
-          if (final.checksumSha256Base64 === hexToBase64(f.sha256)) {
+          if (isMultipart
+            ? await objectMatchesSha256(finalKey, f.sha256, f.byteSize)
+            : final.checksumSha256Base64 === hexToBase64(f.sha256)) {
             // 幂等续跑
           } else {
             app.log.error({ finalKey }, '最终 key 已存在且内容不同 —— 报警');
@@ -340,6 +363,7 @@ async function loadDocumentOut(documentId: string) {
     .from(documentPage)
     .where(eq(documentPage.documentId, documentId));
   return {
+    archived_at: d.archivedAt?.toISOString() ?? null,
     id: d.id, short_id: d.shortId, person_id: d.personId, status: d.status,
     doc_type: d.docType, source: d.source, captured_at: d.capturedAt.toISOString(),
     capture_date: d.captureDate, original_filename: d.originalFilename,

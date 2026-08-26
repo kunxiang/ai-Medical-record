@@ -1,4 +1,4 @@
-import { and, desc, eq, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, lt, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
@@ -20,6 +20,7 @@ const DocAiResponse = z.object({
   doc_type_confidence: z.number().nullable(),
   sampled_on: z.string().nullable(),
   reported_on: z.string().nullable(),
+  facility_name_raw: z.string().nullable(),
   department_raw: z.string().nullable(),
   person_check: z.string(),
   person_check_ack_at: z.string().nullable(),
@@ -48,6 +49,7 @@ export function registerAiRoutes(app: FastifyInstance): void {
         doc_type: d.docType,
         doc_type_confidence: d.docTypeConfidence === null ? null : Number(d.docTypeConfidence),
         sampled_on: d.sampledOn, reported_on: d.reportedOn,
+        facility_name_raw: d.facilityNameRaw,
         department_raw: d.departmentRaw,
         person_check: d.personCheck,
         person_check_ack_at: d.personCheckAckAt?.toISOString() ?? null,
@@ -69,12 +71,24 @@ export function registerAiRoutes(app: FastifyInstance): void {
       // 可见性(m2-04 §5.3b):绑人的作业按 person_access 过滤;
       // 家庭级作业(person_id 为 NULL)对"有任一 editor 权限"的账号可见,
       // 且其载荷本就不含 person/document 标识。
+      const accessible = db
+        .select({ pid: personAccess.personId })
+        .from(personAccess)
+        .innerJoin(person, eq(person.id, personAccess.personId))
+        .where(and(eq(personAccess.accountId, accountId), isNull(person.archivedAt)));
       const editable = db
         .select({ pid: personAccess.personId })
         .from(personAccess)
-        .where(and(eq(personAccess.accountId, accountId), sql`${personAccess.role} in ('owner','editor')`));
+        .innerJoin(person, eq(person.id, personAccess.personId))
+        .where(and(
+          eq(personAccess.accountId, accountId), isNull(person.archivedAt),
+          sql`${personAccess.role} in ('owner','editor')`,
+        ));
       const conds = [
-        or(sql`${aiJob.personId} is null`, sql`${aiJob.personId} in ${editable}`)!,
+        or(
+          sql`${aiJob.personId} in ${accessible}`,
+          and(isNull(aiJob.personId), sql`exists (${editable})`),
+        )!,
       ];
       if (input.state) conds.push(eq(aiJob.state, input.state));
       if (input.kind) conds.push(eq(aiJob.kind, input.kind));

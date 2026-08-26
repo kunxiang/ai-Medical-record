@@ -204,6 +204,10 @@ S3 key 支持 UTF-8,中文名对浏览更直观。但:
 
 没有 doc_type、没有 facility、没有 summary、没有临床日期 —— 那些是 AI 观点,在 `derived/.../meta.json`。
 
+`source='split'` 是唯一的服务端合成来源：拆分文档在新 `short_id` 目录只写自己的
+`capture.json`，其 `pages[].file` 使用完整 key 引用源目录原件。原件与 `page-NN.json`
+不复制、不移动；因此运行时与重建工具不得从原件 key 的 `doc_short_id` 推断当前页归属。
+
 ### `derived/{person}/{doc}/meta.json`(L2 · 可重写)
 
 ```json
