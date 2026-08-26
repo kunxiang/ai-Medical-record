@@ -112,7 +112,7 @@
   - Wiki 引用: `agent_wiki/architecture-data-and-security.md`（原件字节零改动）
   - verify (auto): `pnpm test`
   - verify (manual): 移页后预览不得显示旧页内容
-  - Wiki source: `feature_wiki/ai-metadata-and-jobs.md`；当前为未提交工作树，提交 SHA 待本批代码提交后填写；同步状态 `awaiting owner`，发布与入索引后的检索验证负责人为项目所有者
+  - Wiki source: `feature_wiki/ai-metadata-and-jobs.md` @ `338a4e729f5ae3c22f6505e4caa54eca99c31b66`；同步状态 `awaiting owner`，发布与入索引后的检索验证负责人为项目所有者
 
 ## Milestone 5: PDF 与弱网大文件
 
@@ -129,7 +129,7 @@
   - Wiki 引用: `feature_wiki/capture-archive-and-browse.md`
   - verify (auto): `pnpm typecheck && pnpm test`
   - verify (manual): 中断刷新后只续传未完成分片
-  - Wiki source: `feature_wiki/capture-archive-and-browse.md`；当前为未提交工作树，提交 SHA 待本批代码提交后填写；同步状态 `awaiting owner`，发布与入索引后的检索验证负责人为项目所有者
+  - Wiki source: `feature_wiki/capture-archive-and-browse.md` @ `338a4e729f5ae3c22f6505e4caa54eca99c31b66`；同步状态 `awaiting owner`，发布与入索引后的检索验证负责人为项目所有者
 
 ## Milestone 6: L1 回放与 M2 总验收
 

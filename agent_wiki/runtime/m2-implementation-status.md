@@ -4,7 +4,7 @@ kind: runtime
 status: active
 task: "m2-ai-metadata-and-reconciliation"
 updated_on: 2026-08-26
-source_commit: "09ee9ee8988ba7b0306eefe0e4a8d257d6320e4e"
+source_commit: "338a4e729f5ae3c22f6505e4caa54eca99c31b66"
 owners: ["ai-medical-record"]
 ---
 
