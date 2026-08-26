@@ -9,14 +9,71 @@
 | JSON 字段 | `snake_case`(与数据库一致,减少映射层) |
 | 时间 | ISO 8601 带时区;纯日期字段用 `YYYY-MM-DD`(无时区) |
 | 分页 | 游标式 `?cursor=&limit=`,响应含 `next_cursor` |
-| 错误 | 见 §7 |
+| 错误 | 见 §9 |
 | 契约来源 | `packages/contracts` —— 类型与 Zod schema 的唯一真相 |
 
 > **每个涉及数据的接口都必须经过 `person_access` 过滤。** 这不是可选的中间件,是安全边界。
 
 ---
 
-## 1. 档案(Person)
+## 1. 账号与认证
+
+```
+POST /api/v1/auth/register
+POST /api/v1/auth/login
+GET    /api/v1/account
+DELETE /api/v1/account
+```
+
+### `POST /auth/register`
+
+```json
+{
+  "email": "name@example.com",
+  "password": "至少 12 位的长密码",
+  "display_name": "张三",
+  "birth_date": "1980-05-12",
+  "sex_at_birth": "unknown",
+  "timezone": "Asia/Shanghai"
+}
+```
+
+- 邮箱会去除首尾空格并转为小写；重复邮箱返回 `409 email_already_registered`。
+- 密码长度为 12–128 位，使用 Argon2id 散列后保存；时区必须是有效 IANA 名称。
+- 注册在同一事务中创建 `account`、关系为 `self` 的本人档案和 `owner` 权限，并同步 S3 人员索引、journal 与权限审计。
+- 成功返回 `201 { "access_token": "…" }`，前端保存令牌后直接进入应用。
+- 单实例按直连 IP 固定窗口限流，每分钟最多 5 次注册尝试；超限返回 `429 rate_limited`。
+
+### `POST /auth/login`
+
+请求 `{ "email": "…", "password": "…" }`，成功返回 `{ "access_token": "…" }`。登录邮箱使用与注册相同的规范化规则；账号不存在与密码错误统一返回 `401 unauthenticated`。
+
+当前不提供邮箱验证、找回密码或 MFA。
+
+### `GET /account`
+
+返回当前登录账户的只读信息：`id`、`email`、`display_name`、`timezone` 和 `created_at`。已注销账户及世代不匹配的旧令牌统一返回 `401 unauthenticated`。
+
+### `DELETE /account`
+
+请求体：
+
+```json
+{
+  "current_password": "当前密码",
+  "confirmation": "DELETE"
+}
+```
+
+- 当前密码和固定确认值缺一不可；成功返回 `{ "deleted": true }`。
+- 服务端为账户写入 `archived_at`，匿名化邮箱和显示名称，替换密码散列并递增 `token_epoch`，因此全部既有 JWT 立即失效且账户不能再次登录。
+- 每一行现有 `person_access` 先追加 `access_revoke` 系统审计，再从数据库撤销；任一步失败时数据库事务回滚。
+- 账户主体行、病历原件、患者档案、journal 和审计记录继续保留，以维持历史引用及治理锁约束。此接口不承诺物理销毁医疗档案。
+- Web 仅在服务端确认注销后清除当前来源的 IndexedDB 队列、原始 Blob、人员缓存和本地键值。
+
+---
+
+## 2. 档案(Person)
 
 ```
 GET    /api/v1/people                     列出我有权访问的档案
@@ -55,7 +112,7 @@ DELETE /api/v1/people/:id/identifiers/:iid
 
 ---
 
-## 2. 上传与归档
+## 3. 上传与归档
 
 ### 三步走
 
@@ -183,7 +240,7 @@ POST /api/v1/documents/batch-confirm-person
 
 ---
 
-## 3. 文档与就诊
+## 4. 文档与就诊
 
 ```
 GET    /api/v1/documents                  列表(见筛选参数)
@@ -220,7 +277,7 @@ POST   /api/v1/encounters/:id/documents   把文档归入就诊事件
 
 ---
 
-## 4. 检索
+## 5. 检索
 
 ### `GET /api/v1/search`
 
@@ -258,7 +315,7 @@ POST   /api/v1/encounters/:id/documents   把文档归入就诊事件
 
 ---
 
-## 5. 情境问答
+## 6. 情境问答
 
 ```
 GET  /api/v1/context/templates/:doc_type          取当前模板(含版本)
@@ -287,7 +344,7 @@ POST /api/v1/uploads/presign-audio                取音频上传 URL
 
 ---
 
-## 6. 指标与趋势
+## 7. 指标与趋势
 
 ```
 GET  /api/v1/people/:id/observations           原始观测值(可筛 concept_code)
@@ -354,7 +411,7 @@ GET  /api/v1/people/:id/review-queue           待核查队列(低置信/校验�
 
 ---
 
-## 7. 导出
+## 8. 导出
 
 ```
 POST /api/v1/exports/visit-summary
@@ -393,7 +450,7 @@ GET  /api/v1/exports/:id/download         zip(L1 子集,不含任何 derived)
 
 ---
 
-## 8. 错误格式
+## 9. 错误格式
 
 ```json
 {
@@ -423,7 +480,7 @@ GET  /api/v1/exports/:id/download         zip(L1 子集,不含任何 derived)
 
 ---
 
-## 9. 后台任务状态
+## 10. 后台任务状态
 
 ```
 GET /api/v1/jobs?document_id=…

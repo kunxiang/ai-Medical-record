@@ -21,6 +21,7 @@ export const account = pgTable('account', {
   timezone: text('timezone').notNull().default('Asia/Shanghai'),
   tokenEpoch: integer('token_epoch').notNull().default(0),   // D12:改密码递增 ⇒ 旧 token 失效
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  archivedAt: timestamp('archived_at', { withTimezone: true }),
 });
 
 export const person = pgTable(
@@ -292,4 +293,3 @@ export const normalizationDecision = pgTable(
     uniqueIndex('uq_normalization_fingerprint').on(t.inputFingerprint),
   ],
 );
-

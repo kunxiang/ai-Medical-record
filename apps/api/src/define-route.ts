@@ -49,11 +49,11 @@ export function defineRoute<InS extends z.ZodTypeAny, OutS extends z.ZodTypeAny>
         const claims = await verifyToken(raw);
         // D12(m1-02 §6):epoch 与库中不符 ⇒ 该 token 已被改密码作废
         const rows = await db
-          .select({ epoch: account.tokenEpoch })
+          .select({ epoch: account.tokenEpoch, archivedAt: account.archivedAt })
           .from(account)
           .where(eq(account.id, claims.accountId))
           .limit(1);
-        if (!rows[0] || rows[0].epoch !== claims.epoch) {
+        if (!rows[0] || rows[0].archivedAt !== null || rows[0].epoch !== claims.epoch) {
           throw new ApiError('unauthenticated', '凭证已失效');
         }
         accountId = claims.accountId;

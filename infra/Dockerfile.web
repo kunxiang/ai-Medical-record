@@ -1,0 +1,17 @@
+FROM mirror.gcr.io/library/node:22-bookworm-slim
+
+WORKDIR /app
+
+RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
+
+COPY . .
+
+RUN pnpm install --frozen-lockfile
+
+ARG VITE_API_BASE=https://api.medireco.eckstein.pro
+ENV VITE_API_BASE=${VITE_API_BASE}
+
+RUN pnpm --filter @amr/contracts run build \
+    && pnpm --filter @amr/web run build
+
+ENV NODE_ENV=production

@@ -36,12 +36,16 @@ export async function verifyToken(token: string): Promise<{ accountId: string; e
 
 // spec m0-05 §1:固定窗口限流,单实例内存,键 = 直连对端 IP
 const windows = new Map<string, { windowStart: number; count: number }>();
-export function checkLoginRateLimit(ip: string, now = Date.now()): void {
-  const w = windows.get(ip);
+function checkRateLimit(scope: string, ip: string, limit: number, now = Date.now()): void {
+  const key = `${scope}:${ip}`;
+  const w = windows.get(key);
   if (!w || now - w.windowStart >= 60_000) {
-    windows.set(ip, { windowStart: now, count: 1 });
+    windows.set(key, { windowStart: now, count: 1 });
     return;
   }
   w.count += 1;
-  if (w.count > 10) throw new ApiError('rate_limited', '尝试过于频繁,请稍后再试');
+  if (w.count > limit) throw new ApiError('rate_limited', '尝试过于频繁,请稍后再试');
 }
+
+export const checkLoginRateLimit = (ip: string, now = Date.now()) => checkRateLimit('login', ip, 10, now);
+export const checkRegistrationRateLimit = (ip: string, now = Date.now()) => checkRateLimit('register', ip, 5, now);

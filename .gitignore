@@ -4,6 +4,7 @@ dist/
 .env
 .env.local
 coverage/
+.codex/checkpoints/
 .minio-data/
 .pg-data/
 fixtures/m1/*.jpg

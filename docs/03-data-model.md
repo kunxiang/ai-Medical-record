@@ -39,7 +39,11 @@ normalization_decision(独立 —— 按输入指纹缓存 AI 归一化判断,�
 | `password_hash` | text | |
 | `display_name` | text | |
 | `timezone` | text | 默认 `Asia/Shanghai` |
+| `token_epoch` | integer | JWT 世代；递增后旧令牌立即失效 |
 | `created_at` | timestamptz | |
+| `archived_at` | timestamptz nullable | 账户注销时间；非空时拒绝登录和所有已认证请求 |
+
+账户注销不物理删除此行，因为历史文档、上传批次和人工决策仍以 `account.id` 记录操作者。注销流程会匿名化邮箱与显示名称、替换密码散列、递增 `token_epoch`、写入逐档案 `access_revoke` 审计并删除该账户的全部 `person_access`。病历与患者档案不随账户注销删除。
 
 ### `person` — 档案主体(第一层级)
 

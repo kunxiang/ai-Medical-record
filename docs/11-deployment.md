@@ -40,6 +40,7 @@
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | ✅ | 运行时只需**对象级**权限(Put/Get/Head/Copy/Delete + List) |
 | `S3_REGION` | — | R2 自动推断为 `auto`;显式设置优先。**签名区域不匹配会直接 `SignatureDoesNotMatch`,而错误信息完全不提区域** |
 | `S3_PUBLIC_ENDPOINT` | — | 容器内外 endpoint 不同时用 |
+| `S3_KMS_KEY_ID` | — | `provision-bucket` 配置 SSE-KMS 时使用；当前 MinIO 测试环境需要显式 key id |
 | `WEB_ORIGIN` | ✅ | 逗号分隔。**禁止 `*`** —— 带 `Authorization` 的跨源请求需要精确 origin |
 | `PORT` | — | 默认 8300 |
 | `AI_JOB_CONCURRENCY` | — | 默认 2 |
@@ -152,6 +153,28 @@ API 要的是**一个长活容器**。与本仓库现有部署脚本对齐的选
 2. 前端到 API 是**跨源**的。Vercel 的 `rewrites` 代理能把 `/api/*` 转发到后端从而变成同源,
    但那样每次上传/下载都多绕一跳 Vercel,而本项目的大对象走的是 R2 预签名直传、
    本就不经过 API —— 绕这一跳没有收益。保持跨源 + 白名单即可。
+
+## 4.2 当前主机上的 MediReco 测试部署
+
+仓库提供一套与主机其他服务隔离的 Compose 配置：
+
+- Web：`https://medireco.eckstein.pro` → `127.0.0.1:15173`
+- API：`https://api.medireco.eckstein.pro` → `127.0.0.1:18300`
+- S3：`https://s3.medireco.eckstein.pro` → `127.0.0.1:19000`
+- PostgreSQL：仅本机 `127.0.0.1:55432`
+- MinIO Console：仅本机 `127.0.0.1:19101`
+
+部署密钥保存在 Git 忽略的 `infra/.env.local`，不得提交。启动与停止：
+
+```bash
+docker compose --env-file infra/.env.local -f infra/docker-compose.medireco.yml up -d
+docker compose --env-file infra/.env.local -f infra/docker-compose.medireco.yml ps
+docker compose --env-file infra/.env.local -f infra/docker-compose.medireco.yml down
+```
+
+修改代码后用 `up -d --build` 重建。普通 `down` 保留 PostgreSQL 和 MinIO 命名卷；除非明确要删除全部测试数据，否则不要使用 `down -v`。
+
+Caddy 站点片段保存在 `infra/Caddyfile.medireco`。主机上的合并配置由既有 `eckstein-edge-proxy` 加载，修改前应先备份并运行 `caddy validate`。首次创建数据卷后还需依次执行数据库迁移、`provision-bucket`、`gen-meta` 和 `seed-account`；当前主机已经完成这些初始化。
 
 ## 5. 部署冒烟
 

@@ -107,6 +107,20 @@ export async function getCapture(id: string): Promise<CaptureRecord | undefined>
 export async function allCaptures(): Promise<CaptureRecord[]> {
   return (await db()).getAll('captures');
 }
+
+/** 注销账户后的设备清理。只有服务端已经确认注销后才能调用：
+ * captures/blobs 可能是尚未上传的唯一副本，普通退出登录绝不能清除。 */
+export async function clearAllLocalData(): Promise<void> {
+  const d = await db();
+  const tx = d.transaction(['captures', 'blobs', 'people_cache', 'kv'], 'readwrite');
+  await Promise.all([
+    tx.objectStore('captures').clear(),
+    tx.objectStore('blobs').clear(),
+    tx.objectStore('people_cache').clear(),
+    tx.objectStore('kv').clear(),
+  ]);
+  await tx.done;
+}
 export async function getBlob(id: string, pageNo: number): Promise<BlobRecord | undefined> {
   return (await db()).get('blobs', [id, pageNo]);
 }

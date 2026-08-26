@@ -11,13 +11,13 @@ export default defineConfig({
       registerType: 'autoUpdate',
       injectRegister: 'auto',
       manifest: {
-        name: 'AI 病历 · 采集',
-        short_name: 'AI 病历',
+        name: 'MediReco · 家庭健康档案',
+        short_name: 'MediReco',
         start_url: '/',
         display: 'standalone',
-        background_color: '#ffffff',
-        theme_color: '#0f766e',
-        icons: [],
+        background_color: '#f4f7f5',
+        theme_color: '#0a564f',
+        icons: [{ src: '/favicon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }],
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,woff2}'],

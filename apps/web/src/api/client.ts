@@ -1,5 +1,5 @@
 import {
-  DocumentListResponse, DocumentOut, LoginResponse, PersonListResponse, PresignResponse,
+  AccountProfile, DeleteAccountResponse, DocumentListResponse, DocumentOut, LoginResponse, PersonListResponse, PresignResponse,
   type CaptureDiscardRequestT,
 } from '@amr/contracts';
 
@@ -54,6 +54,21 @@ async function call<T>(
 export const api = {
   login: (email: string, password: string) =>
     call('/api/v1/auth/login', { method: 'POST', body: { email, password }, schema: LoginResponse, auth: false }),
+  register: (body: {
+    email: string;
+    password: string;
+    display_name: string;
+    birth_date: string;
+    sex_at_birth: 'male' | 'female' | 'unknown';
+    timezone: string;
+  }) => call('/api/v1/auth/register', { method: 'POST', body, schema: LoginResponse, auth: false }),
+  account: () => call('/api/v1/account', { schema: AccountProfile }),
+  deleteAccount: (currentPassword: string) =>
+    call('/api/v1/account', {
+      method: 'DELETE',
+      body: { current_password: currentPassword, confirmation: 'DELETE' },
+      schema: DeleteAccountResponse,
+    }),
   people: () => call('/api/v1/people', { schema: PersonListResponse }),
   presign: (body: unknown) =>
     call('/api/v1/uploads/presign', { method: 'POST', body, schema: PresignResponse }),

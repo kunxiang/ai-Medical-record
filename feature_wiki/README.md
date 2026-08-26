@@ -22,6 +22,7 @@ sources:
 ## 当前页面
 
 - [账号注册与首次本人档案](./account-registration.md) — 已交付；支持自助注册、自动建档和直接登录。
+- [账户中心、退出与账户注销](./account-management.md) — 已实现；提供账户信息、退出登录及带撤权审计的匿名化注销。
 - [采集、离线队列与档案浏览](./capture-archive-and-browse.md) — 已交付；M1 自动验收 88/88。
 - [AI 元数据与后台作业](./ai-metadata-and-jobs.md) — M2 进行中；Stage 1、作业队列和归人对账已可运行，归一/归组/纠正/回放尚未交付。
 

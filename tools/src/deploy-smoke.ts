@@ -75,6 +75,13 @@ check('presign 200', pre.status === 200, `status=${pre.status} ${pre.text.slice(
 const up = pre.json?.uploads?.[0];
 
 if (up) {
+  if (process.env.S3_PUBLIC_ENDPOINT) {
+    check(
+      '预签名 URL 使用公网 endpoint',
+      new URL(up.url).origin === new URL(process.env.S3_PUBLIC_ENDPOINT).origin,
+      `actual=${new URL(up.url).origin}`,
+    );
+  }
   const put = await fetch(up.url, { method: 'PUT', headers: up.headers, body: bytes });
   check('浏览器直传路径可用(预签名 PUT)', put.ok, `HTTP ${put.status} ${(await put.text()).slice(0, 160)}`);
 

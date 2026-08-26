@@ -1,0 +1,15 @@
+.git
+.agents
+.codex
+node_modules
+**/node_modules
+dist
+**/dist
+coverage
+*.tsbuildinfo
+**/*.tsbuildinfo
+.env
+.env.*
+infra/.env.local
+.minio-data
+.pg-data
