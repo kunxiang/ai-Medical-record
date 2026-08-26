@@ -184,6 +184,41 @@ const cachedFields = await page.evaluate(async () => {
 check('A1 people_cache 不含医疗 PII', !cachedFields.includes('allergies') && !cachedFields.includes('birth_date'),
   cachedFields.join(','));
 
+// ── A1b 从 PWA 创建家庭成员 ──
+console.log('A1b 创建家庭成员');
+await page.getByTestId('add-person').click();
+await page.getByTestId('person-name').fill('测试家属B');
+await page.getByTestId('person-relation').selectOption('parent');
+await page.getByTestId('person-birth-date').fill('1965-02-03');
+await page.getByTestId('person-sex-at-birth').selectOption('female');
+const [createdPersonResponse] = await Promise.all([
+  page.waitForResponse((response) => response.url() === `${API}/api/v1/people` && response.request().method() === 'POST'),
+  page.getByTestId('confirm-create-person').click(),
+]);
+const createdPerson = await createdPersonResponse.json() as { id: string; slug: string };
+check('A1b 创建成员返回 201', createdPersonResponse.status() === 201, `status=${createdPersonResponse.status()}`);
+await page.getByTestId(`person-${createdPerson.slug}`).waitFor({ timeout: 10_000 });
+check('A1b 新成员出现在选择器并自动选中',
+  (await page.getByTestId(`person-${createdPerson.slug}`).getAttribute('class'))?.split(/\s+/).includes('on') === true);
+const createdCache = await page.evaluate(async (id) => {
+  const g = globalThis as any;
+  const req = g.indexedDB.open('amr-capture');
+  const d = await new Promise<any>((resolve) => { req.onsuccess = () => resolve(req.result); });
+  return new Promise<{ person: Record<string, unknown>; lastSelected: string }>((resolve) => {
+    const tx = d.transaction(['people_cache', 'kv']);
+    const personReq = tx.objectStore('people_cache').get(id);
+    const selectedReq = tx.objectStore('kv').get('last_selected_person_id');
+    tx.oncomplete = () => resolve({ person: personReq.result, lastSelected: selectedReq.result?.v });
+  });
+}, createdPerson.id);
+check('A1b 新成员缓存仍只有选择器四字段',
+  Object.keys(createdCache.person).sort().join(',') === 'display_name,id,relation_to_owner,slug',
+  Object.keys(createdCache.person).sort().join(','));
+check('A1b 自动选择已持久化', createdCache.lastSelected === createdPerson.id,
+  `${createdCache.lastSelected} vs ${createdPerson.id}`);
+// 后续采集场景仍以 A1 的测试患儿为固定归属。
+await page.getByTestId(`person-${personSlug}`).click();
+
 // ── A2 离线拍 5 张 ──
 console.log('A2 离线采集');
 check('A2 fixture 预加载', (await preload(page)) === FIXTURE_NAMES.length);

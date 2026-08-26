@@ -42,6 +42,7 @@ M0 的 `fakeJpeg()` 是 libvips **不可解码**的伪 JPEG,沿用它会让所�
 |---|---|---|
 | A0 | 环境自检 | `window.isSecureContext === true`;跨源 preflight 探针:对 API 与 S3 各发一次 `OPTIONS` → 200 且 `Access-Control-Allow-*` 含所需头(**置于一切之前**:CORS 错会把后续全部失败误导成队列 bug) |
 | A1 | 登录 → 建档 → 打开 PWA | 人员选择器列出该人;`people_cache` 已写入且**不含** `allergies`/`birth_date`;刷新后仍默认选中上次所选 |
+| A1b | 在人员选择器点击“添加成员”并提交 | `POST /people` 返回 201；新成员立即出现在选择器且自动选中；`people_cache` 仍只有四个允许字段，`last_selected_person_id` 指向新成员 |
 | A2 | `setOffline(true)` → 连拍 5 张(`enqueueFixture('photo-plain', {count:5})`) | UI 显示「5 张待上传」;`captures` 5 条、`blobs` 5 条;`client_document_id` 唯一且为 uuid v7;每条 `state='pending'` |
 | A3 | 保持离线 → **刷新页面** | 队列仍 5 条;**读回 blob 校验 byte_size 与 sha256 与入队时一致**(证明 Blob 已物化,非 File 引用);UI 数字不变 |
 | A4 | `setOffline(false)` | 60s 内 `captures` 清空;服务端 5 份文档;桶内 5 个 `page-01.*` 的 sha256 **与 fixture 文件的已知 sha256 逐一相等**(而非"与本地计算值相等" —— 后者是同义反复,证明不了原件零改动);manifests 恰增 5 条 add 行 |

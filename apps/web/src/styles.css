@@ -124,6 +124,10 @@ h1, h2, h3, p { margin-top: 0; }
 
 /* Capture */
 .person-picker { margin-bottom: 18px; padding: 23px 25px; }
+.person-picker-heading { align-items: center; }
+.person-picker-heading > div { flex: 1; }
+.add-person-button { display: inline-flex; flex: 0 0 auto; min-height: 40px; align-items: center; justify-content: center; gap: 7px; padding: 8px 13px; border: 1px solid #add2cb; border-radius: 12px; background: var(--brand-soft); color: var(--brand-deep); font-size: 12px; font-weight: 750; cursor: pointer; }
+.add-person-button:hover { border-color: #7fb8ae; background: #dcefeb; }
 .chips { display: flex; flex-wrap: wrap; gap: 9px; }
 .person-chips { margin-top: 19px; }
 .chip { display: inline-flex; align-items: center; gap: 9px; min-height: 40px; padding: 7px 13px; border: 1px solid var(--line-strong); border-radius: 13px; background: white; color: #405552; cursor: pointer; transition: border-color .18s, background .18s, transform .18s; }
@@ -283,6 +287,16 @@ button.danger { border-color: #edc2c2; background: #fffafa; color: var(--danger)
 .dialog-actions button:disabled { opacity: .48; cursor: not-allowed; }
 .dialog-cancel { border: 1px solid var(--line-strong); background: white; }
 .dialog-confirm-danger { border: 0; background: var(--danger); color: white; }
+.person-dialog { position: relative; width: min(560px, 100%); max-height: calc(100dvh - 40px); overflow-y: auto; padding: 31px; border: 1px solid rgba(255,255,255,.6); border-radius: 24px; background: white; box-shadow: 0 30px 90px rgba(6,28,25,.28); }
+.person-dialog-icon { display: grid; width: 52px; height: 52px; margin-bottom: 18px; place-items: center; border-radius: 16px; background: var(--brand-soft); color: var(--brand); }
+.person-dialog h2 { margin-bottom: 10px; font-size: 24px; letter-spacing: -.03em; }
+.person-dialog > p { margin-bottom: 20px; color: var(--muted); font-size: 13px; line-height: 1.65; }
+.person-dialog-form { display: grid; gap: 15px; }
+.person-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.person-form-note { margin-top: -5px; color: var(--subtle); font-size: 10px; line-height: 1.5; }
+.person-dialog .dialog-error { margin: 0; }
+.person-dialog .dialog-actions { margin-top: 5px; }
+.dialog-confirm { border: 0; background: linear-gradient(135deg, var(--brand), #0d665e); color: white; box-shadow: 0 10px 20px rgba(20,118,109,.18); }
 
 /* Full-size document viewer */
 .document-viewer { position: fixed; z-index: 100; inset: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; padding: 18px 22px; background: #081614; color: white; }
@@ -344,6 +358,9 @@ button.danger { border-color: #edc2c2; background: #fffafa; color: var(--danger)
   .person-chips { flex-wrap: nowrap; overflow-x: auto; margin-right: -19px; padding-right: 19px; scrollbar-width: none; }
   .person-chips::-webkit-scrollbar { display: none; }
   .person-chips .chip { flex: 0 0 auto; min-width: 138px; }
+  .person-picker-heading { align-items: flex-start; flex-wrap: wrap; }
+  .person-picker-heading > div { min-width: calc(100% - 55px); }
+  .add-person-button { width: 100%; }
   .capture-actions { grid-template-columns: 1fr; }
   .capture-action { min-height: 90px; padding: 15px; }
   .action-icon { width: 48px; height: 48px; border-radius: 15px; }
@@ -368,6 +385,8 @@ button.danger { border-color: #edc2c2; background: #fffafa; color: var(--danger)
   .account-session-card, .danger-zone { align-items: stretch; flex-direction: column; gap: 17px; padding: 21px; }
   .account-action-button { width: 100%; }
   .account-dialog { padding: 26px 21px 22px; border-radius: 20px; }
+  .person-dialog { padding: 26px 21px 22px; border-radius: 20px; }
+  .person-form-grid { grid-template-columns: 1fr; }
   .dialog-actions { grid-template-columns: 1fr; }
   .dialog-cancel { order: 2; }
   .archive-avatar { width: 55px; height: 55px; border-width: 4px; border-radius: 18px; font-size: 18px; }

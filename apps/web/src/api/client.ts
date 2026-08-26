@@ -1,5 +1,5 @@
 import {
-  AccountProfile, DeleteAccountResponse, DocumentListResponse, DocumentOut, LoginResponse, PersonListResponse, PresignResponse,
+  AccountProfile, DeleteAccountResponse, DocumentListResponse, DocumentOut, LoginResponse, PersonListResponse, Person as PersonResponse, PresignResponse,
   type CaptureDiscardRequestT,
 } from '@amr/contracts';
 
@@ -20,6 +20,13 @@ export class ApiFailure extends Error {
   constructor(readonly status: number, readonly code: string, message: string) {
     super(message);
   }
+}
+
+export interface CreatePersonInput {
+  display_name: string;
+  birth_date: string;
+  sex_at_birth: 'male' | 'female' | 'unknown';
+  relation_to_owner: 'spouse' | 'parent' | 'child' | 'sibling' | 'other';
 }
 
 async function call<T>(
@@ -70,6 +77,8 @@ export const api = {
       schema: DeleteAccountResponse,
     }),
   people: () => call('/api/v1/people', { schema: PersonListResponse }),
+  createPerson: (body: CreatePersonInput) =>
+    call('/api/v1/people', { method: 'POST', body, schema: PersonResponse }),
   presign: (body: unknown) =>
     call('/api/v1/uploads/presign', { method: 'POST', body, schema: PresignResponse }),
   createDocument: (body: unknown) =>

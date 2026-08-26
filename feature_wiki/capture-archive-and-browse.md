@@ -10,12 +10,14 @@ owners: ["ai-medical-record"]
 routes:
   - "/"
   - "/api/v1/auth/login"
+  - "/api/v1/people"
   - "/api/v1/uploads/presign"
   - "/api/v1/documents"
   - "/api/v1/captures/discard"
 sources:
   - "apps/web/src/App.tsx"
   - "apps/web/src/features/capture/CaptureView.tsx"
+  - "apps/web/src/features/capture/CreatePersonDialog.tsx"
   - "apps/web/src/features/capture/QueuePanel.tsx"
   - "apps/web/src/features/browse/BrowseView.tsx"
   - "apps/web/src/offline/queue.ts"
@@ -32,7 +34,7 @@ sources:
 
 ## Scope
 
-- 已支持：登录、选择归属人、相机拍摄、连续多页拍摄、相册多选、PDF、IndexedDB 队列、前台重试、放弃确认、按人浏览、缩略图和预览。
+- 已支持：登录、创建和选择家庭成员、相机拍摄、连续多页拍摄、相册多选、PDF、IndexedDB 队列、前台重试、放弃确认、按人浏览、缩略图和预览。
 - 不支持：关闭应用后的后台上传、超过 50 MiB 的文件、multipart 断点续传、文档详情 UI、全文检索和趋势。
 
 ## API / Behavior
@@ -45,6 +47,7 @@ sources:
 
 关键行为：
 
+- 人员选择器可调用 `POST /api/v1/people` 创建配偶、父母、子女、兄弟姐妹或其他家庭成员；成功后新成员立即成为当前档案。
 - 每页读入后立即物化到 IndexedDB；多页草稿不依赖当前标签页内存。
 - 未选人时允许先拍，但队列停在“待归人”，不会上传。
 - 上传开始后禁止改归属人，因为最终对象 key 已由 person 决定。
@@ -63,8 +66,8 @@ sources:
 
 ## Operation Guide
 
-1. 登录后选择归属人。
-2. 点击“拍照”连续添加页面，或选择“相册 / PDF”。
+1. 登录后选择归属人；若成员尚未建档，点击“添加成员”，填写姓名、关系和出生信息后创建。
+2. 创建成功会自动切换到新成员；确认当前档案后点击“拍照”，或选择“相册 / PDF”。
 3. 多页拍摄完成后点击“完成这份”。
 4. 保持应用打开；队列显示“全部已上传”后再离开。
 5. 切换到“档案”，选择人员并按日期浏览已上传文档。
@@ -77,6 +80,7 @@ sources:
 - 自动证据：`specs/m1/RESULTS.md` 的 A 组 88/88 与 B 组全绿。
 - 核查断网连拍、刷新恢复、恢复网络后队列清空、跨登录续跑、归属人和日期分组。
 - 公网浏览器验证：桌面 1440px 与手机 390px 均可点击真实已上传图片打开全屏预览，派生图请求返回 `302 → 200`，图片完成解码，Esc 可关闭且控制台无错误。
+- 家庭成员补录验证：Chromium 桌面 1440×900 与手机 390×844 均通过创建、自动切换、顶栏同步和精简人员缓存检查，控制台无错误；完整 M1 A1b 与项目所有者预览仍待执行。
 - 人工真机项仍需项目所有者在 iOS Safari、Android Chrome 和真实三页单据上执行。
 - 发布并完成知识索引后，由项目所有者验证搜索“保持应用打开直到上传完成”能命中本页。
 
@@ -92,3 +96,4 @@ sources:
 - 2026-08-18：M1 自动验收 A 组 88/88、B 组全绿；真机 C1–C3 待所有者验证。
 - 2026-08-24：建立稳定功能知识页。
 - 2026-08-26：修复档案卡片无效 Hash 跳转，增加全屏大图查看和多页翻页控件。
+- 2026-08-26：补齐家庭成员创建入口；创建后立即更新精简人员缓存并切换当前档案。

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Archive, Camera, CircleUserRound, ShieldCheck, TriangleAlert } from 'lucide-react';
-import { api, auth } from './api/client.js';
+import { api, auth, type CreatePersonInput } from './api/client.js';
 import {
   allCaptures, clearAllLocalData, db, kvGet, kvSet, recoverAfterRestart,
   type CaptureRecord, type PersonCacheRecord,
@@ -23,6 +23,7 @@ export function App(): JSX.Element {
   const [persisted, setPersisted] = useState(true);
   const [tab, setTab] = useState<'capture' | 'browse' | 'account'>('capture');
   const [notice, setNotice] = useState<string | null>(null);
+  const peopleMutationRevision = useRef(0);
 
   const refreshQueue = useCallback(async () => {
     setQueue(await allCaptures());
@@ -59,7 +60,10 @@ export function App(): JSX.Element {
     if (!token) return;
     void (async () => {
       try {
+        const revision = peopleMutationRevision.current;
         const res = await api.people();
+        // 创建成员可能与登录后的初次刷新并发。较早发出的 GET 不得用旧列表覆盖新成员。
+        if (revision !== peopleMutationRevision.current) return;
         const slim: Person[] = res.people.map((p) => ({
           id: p.id, slug: p.slug, display_name: p.display_name, relation_to_owner: p.relation_to_owner,
         }));   // ★ 只缓存四项:选择器不需要过敏史/生日(医疗 PII)
@@ -90,6 +94,22 @@ export function App(): JSX.Element {
   const onSelect = useCallback((p: Person) => {
     setSelected(p);
     void kvSet('last_selected_person_id', p.id);
+  }, []);
+
+  const createPerson = useCallback(async (input: CreatePersonInput): Promise<Person> => {
+    const created = await api.createPerson(input);
+    peopleMutationRevision.current += 1;
+    const slim: Person = {
+      id: created.id,
+      slug: created.slug,
+      display_name: created.display_name,
+      relation_to_owner: created.relation_to_owner,
+    };
+    await (await db()).put('people_cache', slim);
+    await kvSet('last_selected_person_id', slim.id);
+    setPeople((current) => [...current.filter((person) => person.id !== slim.id), slim]);
+    setSelected(slim);
+    return slim;
   }, []);
 
   const pendingCount = queue.filter((item) => item.state !== 'draft').length;
@@ -194,6 +214,7 @@ export function App(): JSX.Element {
           people={people}
           selected={selected}
           onSelect={onSelect}
+          onCreatePerson={createPerson}
           queue={queue}
           onQueueChanged={refreshQueue}
         />

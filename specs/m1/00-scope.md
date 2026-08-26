@@ -13,7 +13,7 @@
 | 2 | API 增量(列表、派生物、discard、**CORS**、**D11 审计**、**D12 吊销**) | [02-api-delta.md](./02-api-delta.md) |
 | 3 | 派生物生成(L2) | [03-derivatives.md](./03-derivatives.md) |
 | 4 | 离线队列(IndexedDB + 前台驱动) | [04-offline-queue.md](./04-offline-queue.md) |
-| 5 | PWA(采集、归人、浏览) | [05-web-app.md](./05-web-app.md) |
+| 5 | PWA(家庭成员建档、采集、归人、浏览) | [05-web-app.md](./05-web-app.md) |
 | 6 | 验收(含测试注入面与 fixture 生成) | [99-acceptance.md](./99-acceptance.md) |
 
 ## 2. 明确不做(M1 边界)

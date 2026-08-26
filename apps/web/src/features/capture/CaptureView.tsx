@@ -1,24 +1,36 @@
 import { useRef, useState } from 'react';
 import {
-  Camera, Check, CheckCircle2, FileStack, Images, LockKeyhole, ShieldCheck,
+  Camera, Check, CheckCircle2, FileStack, Images, LockKeyhole, Plus, ShieldCheck,
   Sparkles, UploadCloud, UserRound, UsersRound,
 } from 'lucide-react';
+import type { CreatePersonInput } from '../../api/client.js';
 import type { Person } from '../../App.js';
 import { CaptureRejected, appendDraftPage, finalizeDraft, preparePage, reassignQueued } from '../../offline/capture.js';
 import { ensureRoomFor } from '../../offline/persist.js';
 import type { CaptureRecord } from '../../offline/db.js';
 import { QueuePanel } from './QueuePanel.js';
+import { CreatePersonDialog } from './CreatePersonDialog.js';
 import { tick } from '../../offline/queue.js';
 
 // spec m1-05 §3/§4。连拍 = 重复调起单张 capture="environment"(iOS 上 multiple 被忽略);
 // 每页读入后立即落盘 draft(内存里的照片会随标签页被回收而全丢)。
 
+const RELATION_LABELS: Record<string, string> = {
+  self: '本人',
+  spouse: '配偶',
+  parent: '父母',
+  child: '子女',
+  sibling: '兄弟姐妹',
+  other: '其他',
+};
+
 export function CaptureView({
-  people, selected, onSelect, queue, onQueueChanged,
+  people, selected, onSelect, onCreatePerson, queue, onQueueChanged,
 }: {
   people: Person[];
   selected: Person | null;
   onSelect: (p: Person) => void;
+  onCreatePerson: (input: CreatePersonInput) => Promise<Person>;
   queue: CaptureRecord[];
   onQueueChanged: () => Promise<void>;
 }): JSX.Element {
@@ -27,6 +39,7 @@ export function CaptureView({
   const [draftId, setDraftId] = useState<string | null>(null);
   const [draftPages, setDraftPages] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [creatingPerson, setCreatingPerson] = useState(false);
 
   const pending = queue.filter((q) => q.state !== 'draft');
   const needsPerson = queue.filter((q) => q.state === 'pending_person');
@@ -75,12 +88,16 @@ export function CaptureView({
       </header>
 
       <section className="surface person-picker" data-testid="person-picker">
-        <div className="section-heading">
+        <div className="section-heading person-picker-heading">
           <span className="section-icon"><UsersRound size={20} /></span>
           <div>
             <h2>这是谁的记录？</h2>
             <p>上传前必须确认归属，避免家庭成员档案混淆。</p>
           </div>
+          <button type="button" className="add-person-button" onClick={() => setCreatingPerson(true)}
+                  data-testid="add-person">
+            <Plus size={17} /> 添加成员
+          </button>
         </div>
         <div className="chips person-chips">
           {people.map((p) => (
@@ -93,13 +110,13 @@ export function CaptureView({
               <span className="person-avatar">{p.display_name.slice(0, 1)}</span>
               <span className="person-chip-copy">
                 <strong>{p.display_name}</strong>
-                <small>{p.relation_to_owner === 'self' ? '本人' : p.relation_to_owner === 'child' ? '孩子' : p.relation_to_owner}</small>
+                <small>{RELATION_LABELS[p.relation_to_owner] ?? '家庭成员'}</small>
               </span>
               {selected?.id === p.id && <Check className="chip-check" size={17} />}
             </button>
           ))}
           {people.length === 0 && (
-            <div className="inline-empty"><UserRound size={20} /><span>暂无档案，需要先联网建档</span></div>
+            <div className="inline-empty"><UserRound size={20} /><span>暂无档案，请先添加家庭成员</span></div>
           )}
         </div>
         {!selected && (
@@ -187,6 +204,15 @@ export function CaptureView({
         }}
         onChanged={onQueueChanged}
       />
+      {creatingPerson && (
+        <CreatePersonDialog
+          onClose={() => setCreatingPerson(false)}
+          onCreate={async (input) => {
+            await onCreatePerson(input);
+            setCreatingPerson(false);
+          }}
+        />
+      )}
     </div>
   );
 }
