@@ -67,6 +67,6 @@ owners: ["ai-medical-record"]
 ## 当前门禁
 
 - M0/M1 已于 2026-08-26 经项目所有者确认验收并关闭；剩余人工项没有新增独立执行证据，已在各自 `RESULTS.md` 如实记录。
-- 测试部署的 Stage 1 仍缺有效 `ANTHROPIC_API_KEY`；不阻塞离线实现，但真实模型 job 到 `done` 前不得宣称线上 AI 可用。
+- 2026-08-26 测试部署已配置 DeepSeek `deepseek-v4-flash-vision-exp`；账户 `/models` 与非敏感图片/PDF 探针均确认视觉输入可用。图片/文本使用 Responses API 严格 JSON Schema，PDF 使用 Anthropic document 兼容层并在本地 Zod 再校验。仍须有一个真实上传文档 job 到 `done` 后才能宣称线上 AI 可用。
 - 文档边界实现已通过类型、单元与构建门禁；尚未在现有本机档案上执行破坏逻辑归属的人工冒烟，需用专用测试文档验收移页后预览。
 - multipart 源码和目标测试已通过；当前测试部署尚未发布本工作树，真实 12 MiB 上传、刷新后只补缺失 part 及整文件登记仍需项目所有者在发布后验收。

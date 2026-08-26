@@ -13,6 +13,7 @@ source_types:
   - durable_engineering_wiki
   - runtime_work_wiki
   - product_feature_wiki
+  - external_vendor_documentation
 
 expanded_paths:
   - README.md
@@ -67,6 +68,8 @@ expanded_paths:
   - tools/src/rebuild-index.ts
   - packages/ai/src/stage1.ts
   - packages/ai/src/transport.ts
+  - packages/ai/src/deepseek-transport.ts
+  - packages/ai/src/models.ts
   - packages/ai/src/facility.ts
   - packages/ai/src/encounter.ts
   - agent_wiki/architecture-data-and-security.md
@@ -135,6 +138,18 @@ selected_findings:
     relevance: ">8 MiB 文件必须强制走 multipart，刷新后仅续传缺失 part，complete 后必须证明合并对象的原始整文件 SHA-256。"
     decision: "presign 对大文件返回空单 PUT URL；DB 持久化 multipart 完成校验锚点，浏览器持久化 UploadId/ETag，complete 由 API GET 回流重算摘要。"
     status: implemented_in_worktree_awaiting_deployment_and_owner_preview
+  - id: m2-deepseek-vision-provider
+    relevance: "Stage 1 必须同时处理图片/PDF 并返回可本地强校验的结构化输出。"
+    decision: "deepseek-v4-flash-vision-exp 图片/文本走 Responses API json_schema；PDF 走 Anthropic document 兼容层、显式附加 schema 约束并由 Zod 终校验。"
+    evidence: "2026-08-26 账户 /models 包含该模型；非敏感 PNG、医疗图片夹具、PDF 夹具及 Stage1Out schema 均完成供应商探针。"
+
+external_sources:
+  - url: "https://api-docs.deepseek.com/quick_start/pricing/"
+    authority: official_vendor
+    finding: "当前模型表列出 deepseek-v4-flash-vision-exp，并标注 JSON Output、Responses API 与 Anthropic API 支持。"
+  - url: "https://api-docs.deepseek.com/guides/json_mode/"
+    authority: official_vendor
+    finding: "Chat Completions JSON Output 仅保证合法 JSON；严格 schema 优先使用 Responses API json_schema 并保留本地校验。"
 
 implementation_candidates:
   backend:
@@ -171,7 +186,7 @@ implementation_candidates:
     - specs/m2/RESULTS.md
 
 blocking_unknowns:
-  - "A valid Anthropic credential is not present in the deployed API container; real-model verification requires owner-provided secret configuration."
+  - "DeepSeek 视觉实验模型尚需部署后用真实上传文档验证一个 job 到 done。"
   - "The M2 regression corpus of at least 20 de-identified real documents has not been provided."
 
 invalidations:

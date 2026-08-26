@@ -72,7 +72,7 @@ sources:
 
 ## Operation Guide
 
-1. 确认 API 进程配置 `ANTHROPIC_API_KEY`，并保持 `AI_JOB_WORKER` 开启。
+1. 确认 API 进程配置 `AI_PROVIDER` 及对应密钥（`ANTHROPIC_API_KEY` 或 `DEEPSEEK_API_KEY`），并保持 `AI_JOB_WORKER` 开启。
 2. 正常登记图片或 PDF 文档；系统自动创建 Stage 1 job。
 3. 使用 `/api/v1/jobs` 或 `/api/v1/documents/:id/ai` 查看状态和失败原因。
 4. 仅在确认需要重跑时调用 rerun 端点。

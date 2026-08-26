@@ -55,7 +55,7 @@
 
 **目标:不用手填任何东西,系统自己知道这是谁、什么时候、哪家医院、什么单子。**
 
-- [ ] Claude 视觉调用封装 + prompt 版本管理
+- [x] 可配置视觉模型调用封装 + prompt 版本管理（DeepSeek/Anthropic）
 - [ ] Stage 1:分类 + 元数据 + **全文提取**
 - [ ] **本地归人确认 + 上传后 AI 对账告警(person_mismatch)**(ADR-041)(见 [07 · API](./07-api-contract.md#归人建议可选前置调用))
 - [ ] facility 归一(AI 判断 + normalization_decision 缓存,ADR-040)

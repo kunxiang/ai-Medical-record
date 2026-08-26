@@ -55,7 +55,7 @@ async function loadContext(documentId: string): Promise<DocContext | null> {
 }
 
 /** 送进模型的必须是 ai 派生物,不是 L1 原件(ADR-050)。
- *  Claude 不解析图片元数据 —— 原件的 EXIF Orientation 会被完全忽略,
+ *  视觉模型不会依靠原件的 EXIF Orientation 自动旋正,
  *  横躺的单据进模型不会报错,只表现为"提取质量莫名其妙地差"。 */
 async function prepareImages(ctx: DocContext): Promise<S1PageInput[]> {
   const out: S1PageInput[] = [];
@@ -64,7 +64,7 @@ async function prepareImages(ctx: DocContext): Promise<S1PageInput[]> {
       personSlug: ctx.personSlug, docShortId: ctx.shortId, pageNo: p.pageNo,
       variant: 'ai', sourceKey: p.storageKey, mimeType: p.mimeType,
     });
-    // 预签名有效期 ≥900s(m2-02 §3.1):Anthropic 服务端要去 fetch 它
+    // 预签名有效期 ≥900s(m2-02 §3.1):模型服务端要去 fetch 它
     out.push({ pageNo: p.pageNo, imageUrl: await presignGetKey(key, 900) });
   }
   return out;

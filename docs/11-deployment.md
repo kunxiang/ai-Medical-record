@@ -45,7 +45,10 @@
 | `PORT` | — | 默认 8300 |
 | `AI_JOB_CONCURRENCY` | — | 默认 2 |
 | `AI_JOB_WORKER` | — | `0` 关闭作业轮询器(验收时用) |
-| `ANTHROPIC_API_KEY` | M2 起 | 不配则 S1 作业失败进 `needs_human`,不影响采集与浏览 |
+| `AI_PROVIDER` | M2 起 | `anthropic` 或 `deepseek`；未配时依 key 存在性兼容旧部署 |
+| `AI_MODEL` | — | 可选的显式模型 ID；DeepSeek 视觉默认 `deepseek-v4-flash-vision-exp` |
+| `ANTHROPIC_API_KEY` | M2 起 | `AI_PROVIDER=anthropic` 时必需 |
+| `DEEPSEEK_API_KEY` | M2 起 | `AI_PROVIDER=deepseek` 时必需；图片/文本走 Responses API，PDF 走 Anthropic document 兼容层 |
 
 PWA 构建期变量:`VITE_API_BASE`(API 的对外地址)。**禁止**设 `VITE_M1_TEST_HOOKS`。
 
@@ -138,7 +141,7 @@ API(`apps/api`)**不要**上 Vercel,四条都是硬伤,不是调优问题:
 | 依赖 | 与 Vercel 函数模型的冲突 |
 |---|---|
 | `startWorker()` 的 `setInterval` 轮询(3s 取作业 / 60s 收僵尸) | 函数只在请求期间存活,响应一返回就冻结 —— 作业队列**永远不会被消费**,`ai_job` 只进不出 |
-| Stage-1 调 Claude,SDK 超时设 600s | 超过 Vercel 函数的最长执行时长;长图批次会被拦腰截断,重试也一样 |
+| Stage-1 调视觉模型 API,超时设 600s | 超过 Vercel 函数的最长执行时长;长图批次会被拦腰截断,重试也一样 |
 | `initSharp()` + 请求路径里现算派生物 | sharp 是原生模块,进程级全局;每次冷启动重新初始化,派生物生成会顶到超时 |
 | postgres.js 长连接 | 无服务器需要连接池代理,否则并发一上来就打爆 Postgres 连接数 |
 
