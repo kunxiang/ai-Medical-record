@@ -2,7 +2,7 @@
 title: "AI 病历 — 账户中心、退出与账户注销"
 category: feature
 tags: [account, authentication, logout, privacy, deletion]
-status: in-rollout
+status: shipped
 module: platform
 audience: [user, operator, reviewer]
 since: 2026-08-26
@@ -63,7 +63,8 @@ sources:
 ## Verification
 
 - 自动验证：共享契约 18 项测试通过；全仓 `pnpm typecheck`、`pnpm test` 和 Web 生产构建通过。
-- 发布验证：迁移后确认 `GET /account` 返回资料；错误密码不能注销；正确密码注销后旧令牌返回 401、`person_access` 清空且审计存在 `access_revoke`。
+- 公网 API 验证：迁移后 `GET /account` 返回正确资料；错误密码不能注销；正确密码注销后旧令牌和原邮箱登录均返回 401，账户字段已匿名化，`token_epoch = 1`、`archived_at` 非空、`person_access` 为 0，S3 月度审计存在对应 `access_revoke`。
+- 公网浏览器验证：桌面 1440×900 与移动端 390×844 均完成账户资料展示、注销弹窗和成功返回登录页；token 已清除，IndexedDB 的 captures、blobs、people_cache、kv 均为 0，控制台无错误。
 - 项目所有者在本页经人工审核发布、知识摄取达到 `index_state=ready` 后，负责验证搜索“注销账户后病历是否删除”能命中本页。
 
 ## Risks and Fallback
@@ -75,4 +76,4 @@ sources:
 
 ## Change Log
 
-- 2026-08-26：实现账户中心、当前浏览器退出、密码与二次确认保护的匿名化注销及本机数据清理。
+- 2026-08-26：上线账户中心、当前浏览器退出、密码与二次确认保护的匿名化注销及本机数据清理。
