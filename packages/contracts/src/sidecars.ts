@@ -113,7 +113,7 @@ export const ManifestAdd = z
     prefix: z.string(),
     created_at: IsoDateTime,
     // m2-01 §3.5:拆分产生的新文档也要有 add 行,但必须能与采集产生的区分开。
-    // 它共用源文档的物理前缀(D7 不动原件的直接后果),且自己写了一份 capture.json。
+    // 新文档有自己的元数据前缀与 capture.json；capture.pages 可跨前缀引用源原件。
     origin: z.enum(['capture', 'split']).default('capture'),
   })
   .strict();

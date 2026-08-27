@@ -12,7 +12,8 @@ export const AiJobError = z
     stage: z.string(),
     code: z.string(),
     message: z.string().max(1000),
-    category: z.string().nullable(),   // refusal 的 stop_details.category
+    // 非 refusal 错误的生产端不写 category；解析旧记录时统一补为 null。
+    category: z.string().nullable().default(null),
     at: IsoDateTime,
   })
   .strict();

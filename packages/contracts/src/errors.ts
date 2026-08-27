@@ -6,6 +6,7 @@ export const ERROR_CODES = {
   person_confirmation_required: 400,
   unauthenticated: 401,
   not_found: 404,
+  email_already_registered: 409,
   duplicate_client_document_id: 409,
   sha256_mismatch: 409,
   upload_consumed: 409,

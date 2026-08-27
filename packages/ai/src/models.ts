@@ -4,8 +4,20 @@
 // 为什么值得一条 CI 断言:模型换代时,散落在调用点的模型名会漏改一两处,
 // 而漏改的表现是"某条路径悄悄用着旧模型",既不报错也难察觉。
 
-/** 视觉提取与分类。Opus 5:1M 上下文、高分辨率视觉档(长边 2576 / 4784 视觉 token)。 */
-export const MODEL = 'claude-opus-5' as const;
+export type AiProvider = 'anthropic' | 'deepseek';
+
+const configuredProvider = process.env.AI_PROVIDER?.trim()
+  ?? (process.env.DEEPSEEK_API_KEY?.trim() ? 'deepseek' : 'anthropic');
+if (configuredProvider !== 'anthropic' && configuredProvider !== 'deepseek') {
+  throw new Error(`AI_PROVIDER 仅支持 anthropic/deepseek，实际为 ${configuredProvider}`);
+}
+
+/** 显式 provider 优先；未配置时为了兼容旧部署，根据 DeepSeek key 是否存在推断。 */
+export const AI_PROVIDER = configuredProvider as AiProvider;
+
+/** 模型 ID 的单一出处。生产可用 AI_MODEL 钉住实验模型版本。 */
+export const MODEL = process.env.AI_MODEL?.trim()
+  || (AI_PROVIDER === 'deepseek' ? 'deepseek-v4-flash-vision-exp' : 'claude-opus-5');
 
 /** 结构化输出 + 服务端 fallback 都要求走 beta 命名空间(m2-02 §2 / 审核 #003 A1) */
 export const BETAS = ['server-side-fallback-2026-07-01'] as const;

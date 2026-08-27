@@ -11,9 +11,7 @@ import { db } from '../db/client.js';
 import { person, personAccess, personIdentifier } from '../db/schema.js';
 import { defineRoute } from '../define-route.js';
 import { ApiError, notFound } from '../errors.js';
-import { lockPerson, newId, personToApi, syncPersonToS3 } from '../person-service.js';
-import { appendAudit } from '../journal.js';
-import { serverTimestamp } from '@amr/storage';
+import { createOwnedPerson, lockPerson, newId, personToApi, syncPersonToS3 } from '../person-service.js';
 
 const PATCH_KEY_TO_COL = {
   display_name: 'displayName',
@@ -40,29 +38,7 @@ export function registerPeopleRoutes(app: FastifyInstance): void {
       for (let attempt = 0; ; attempt++) {
         const slug = newPersonSlug();
         try {
-          const sidecar = await db.transaction(async (tx) => {
-            const id = newId();
-            await tx.insert(person).values({
-              id, slug,
-              displayName: input.display_name,
-              namePinyin: input.name_pinyin,
-              birthDate: input.birth_date,
-              sexAtBirth: input.sex_at_birth,
-              gender: input.gender,
-              relationToOwner: input.relation_to_owner,
-              bloodType: input.blood_type,
-              allergies: input.allergies,
-              chronicConditions: input.chronic_conditions,
-              note: input.note,
-            });
-            await tx.insert(personAccess).values({ accountId, personId: id, role: 'owner' });
-            // D11(m1-02 §5):权限授予进系统级审计
-            await appendAudit(tx, {
-              schema_version: '1.0', op: 'access_grant', account_id: accountId,
-              person_id: id, person_slug: slug, role: 'owner', at: serverTimestamp(),
-            });
-            return syncPersonToS3(tx, id, accountId);
-          });
+          const sidecar = await db.transaction((tx) => createOwnedPerson(tx, input, accountId, slug));
           return personToApi(sidecar);
         } catch (e) {
           const msg = e instanceof Error ? e.message : '';

@@ -1,0 +1,1 @@
+ALTER TABLE "document" ADD COLUMN "facility_name_raw" text;

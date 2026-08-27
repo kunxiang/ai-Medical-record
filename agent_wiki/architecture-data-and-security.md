@@ -3,7 +3,7 @@ title: "架构、数据分层与安全边界"
 kind: engineering
 status: active
 scope: repository
-verified_on: 2026-08-24
+verified_on: 2026-08-26
 owners: ["ai-medical-record"]
 sources:
   - "docs/01-architecture.md"
@@ -11,6 +11,7 @@ sources:
   - "docs/04-storage-layout.md"
   - "apps/api/src/access.ts"
   - "apps/api/src/define-route.ts"
+  - "apps/api/src/routes/auth.ts"
 ---
 
 # 架构、数据分层与安全边界
@@ -55,6 +56,7 @@ sources:
 - `requirePersonAccess` 与 `requireDocumentAccess` 是核心检查点。
 - 不存在、无授权、权限不足或档案已归档统一表现为 404，避免泄露资源是否存在。
 - 浏览器使用 Bearer JWT；AI 密钥只能存在于 API 进程。
+- 账户注销保留 `account.id` 作为历史操作者锚点；通过 `archived_at` 禁止登录、递增 `token_epoch` 撤销全部 JWT、匿名化可变账户身份并删除 `person_access`。账户生命周期不得级联删除 person、病历或 L1 审计。
 
 ## 部署约束
 

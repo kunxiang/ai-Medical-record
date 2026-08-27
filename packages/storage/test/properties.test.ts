@@ -5,6 +5,7 @@ import {
   canonicalJson,
   captureDateInZone,
   newDocShortId,
+  newFacilitySlug,
   newPersonSlug,
   parseKey,
 } from '../src/index.js';
@@ -24,8 +25,10 @@ describe('slug(spec m0-03 §1)', () => {
     for (let i = 0; i < 500; i++) {
       const p = newPersonSlug();
       const d = newDocShortId();
+      const f = newFacilitySlug();
       expect(p).toMatch(/^p[23456789abcdefghjkmnpqrstvwxyz]{5}$/);
       expect(d).toMatch(/^d[23456789abcdefghjkmnpqrstvwxyz]{5}$/);
+      expect(f).toMatch(/^f[23456789abcdefghjkmnpqrstvwxyz]{5}$/);
     }
   });
   it('分布粗检:30 个字符在 3000 样本中全部出现', () => {
@@ -58,6 +61,9 @@ describe('key 往返(spec m0-03 §2,≥1000 例)', () => {
 
       const jk = buildKey.journal({ personSlug, year: '2026', month: '08' });
       expect(parseKey(jk)).toEqual({ kind: 'journal', personSlug, year: '2026', month: '08' });
+
+      const dk = buildKey.decision({ year: '2026', month: '08' });
+      expect(parseKey(dk)).toEqual({ kind: 'decision', year: '2026', month: '08' });
     }
   });
 

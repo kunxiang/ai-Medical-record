@@ -8,3 +8,4 @@
 | 4 | 2026-08-18 | 新增 `capture_discard_event` 台账(迁移 0002),放弃上报按 `discard_event_id` 服务端幂等;`appendJournal` 不再覆盖调用方传入的 `event_id` | 验收实证:m1-99 A8 要求"重复上报同一 `discard_event_id` 只产生一行",而原实现既丢弃了客户端的幂等键、又无任何服务端去重。台账是 L2 结构,重建后的重放窗口记为 D17。 |
 | 5 | 2026-08-18 | `POST /documents` 的幂等比对改用 `idempotencyFingerprint`(原为整包 canonical payload);`rebuild-index` 从 capture.json 重算该指纹存入 `column_set.idem_fingerprint` | 审核 #002 A-1 的修复函数写进了 contracts 却没有接线,API 仍在比对整包 —— 重试必然重新 presign、`batch_id` 必变 ⇒ 每次重试都 409 终止。指纹的每个输入都是 L1 事实,故重建可原样重算,不引入新的不可重建状态。 |
 | 6 | 2026-08-18 | `pauseAt` 由"抛错"改为 §0.1 写明的"挂起,不推进";`verify-rebuild` 的字段表移除 `thumb_key`(m1-99 A19) | 抛错会让队列自行把状态清理干净,A5 的崩溃恢复路径因此从未被真正测到。`thumb_key` M1 不写,比对恒为 null 的列只制造噪声。 |
+| 7 | 2026-08-26 | 人员选择器补接 M0 `POST /people`，新增家庭成员建档、自动切换与精简缓存更新；验收新增 A1b | 原 A1 先用 API 建档再打开 PWA，只证明“已有人员可以选择”，没有覆盖用户从界面创建家庭成员，导致 M0 能力在 M1 产品中不可达。 |

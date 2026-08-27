@@ -64,7 +64,7 @@ AI 管线不是"一个大模型一把梭",而是**多个窄职责角色 + 确定
 | 对象存储 | **S3 兼容** | 见 [04 · 存储布局](./04-storage-layout.md) |
 | 前端 | **React + Vite + PWA** | Service Worker 是离线队列的前提 |
 | 检索 | 见下方 §5 | |
-| AI | **Claude API**(视觉/结构化)+ **独立 ASR**(语音) | 见 [06 · AI 管线](./06-ai-pipeline.md) |
+| AI | **可配置视觉模型 API**(DeepSeek/Anthropic)+ **独立 ASR**(语音) | 见 [06 · AI 管线](./06-ai-pipeline.md) |
 | 部署 | Docker Compose(单机起步) | |
 
 ### 为什么 API-first
@@ -189,7 +189,9 @@ document ──> extraction(v1, model=X, prompt=Y)
 ## 8. 环境与配置
 
 ```
-ANTHROPIC_API_KEY          # AI 提取
+AI_PROVIDER / AI_MODEL     # AI 提取提供方与模型
+ANTHROPIC_API_KEY          # Anthropic 提供方
+DEEPSEEK_API_KEY           # DeepSeek 提供方
 ASR_PROVIDER / ASR_API_KEY # 语音转写(见 06)
 DATABASE_URL               # PostgreSQL
 S3_ENDPOINT / S3_BUCKET

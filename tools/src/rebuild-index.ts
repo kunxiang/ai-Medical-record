@@ -4,7 +4,10 @@
 import { GetObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import postgres from 'postgres';
 import { uuidv7 } from 'uuidv7';
-import { CaptureSidecar, ManifestLine, PersonSidecar, idempotencyFingerprint } from '@amr/contracts';
+import {
+  CaptureSidecar, CorrectionSidecar, ManifestLine, PersonSidecar,
+  correctionSortKey, idempotencyFingerprint,
+} from '@amr/contracts';
 import { adminClient, BUCKET } from './s3-admin.js';
 
 const s3 = adminClient();
@@ -65,7 +68,13 @@ console.log(`persons restored: ${personKeys.length}`);
 // ── 2. manifests 回放(event_id 幂等 → 文档)──
 const manifestKeys = (await listKeys('_index/manifests/')).sort();
 const seenEventIds = new Set<string>();
-type AddLine = { doc_short_id: string; person_slug: string; prefix: string; created_at: string };
+type AddLine = {
+  doc_short_id: string;
+  person_slug: string;
+  prefix: string;
+  created_at: string;
+  origin: 'capture' | 'split';
+};
 const docState = new Map<string, AddLine & { finalSlug: string }>();
 for (const key of manifestKeys) {
   const text = await getText(key);
@@ -122,7 +131,7 @@ for (const [shortId, st] of docState) {
   }
   // 幂等指纹从 capture.json 原样重算 —— 它的每个输入都是 L1 事实。
   // 不重算的话:重建后客户端重放同一 client_document_id 会撞 409 终止(而非 200 命中)。
-  const fingerprint = idempotencyFingerprint({
+  const fingerprint = cap.source === 'split' ? null : idempotencyFingerprint({
     person_id: personId,
     person_confirmed: true,
     confirmed_by: cap.person.confirmed_by,
@@ -143,14 +152,17 @@ for (const [shortId, st] of docState) {
     values (${cap.document_id}, ${shortId}, ${personId}, 'unknown', ${cap.pages.length}, ${cap.source},
             ${cap.original_filename}, ${cap.captured_at}, ${cap.capture_date}, ${cap.uploaded_by}, 'ready',
             ${cap.client_document_id}, ${cap.created_at},
-            ${sql.json({ idem_fingerprint: fingerprint })})
+            ${sql.json(fingerprint ? { idem_fingerprint: fingerprint } : {})})
     on conflict (id) do nothing
   `;
-  for (const pg of cap.pages) {
+  // split capture 的 pages 是跨前缀的原件引用。源 capture 已恢复这些 page 行；
+  // 此处只建目标文档骨架，页归属由后面的 page_move correction 转移，避免 storage_key 重复。
+  for (const pg of st.origin === 'split' ? [] : cap.pages) {
+    const storageKey = pg.file.startsWith('people/') ? pg.file : st.prefix + pg.file;
     await sql`
       insert into document_page (id, document_id, page_no, storage_key, content_sha256, byte_size,
                                  mime_type, width, height, capture_order)
-      values (${uuidv7()}, ${cap.document_id}, ${pg.page_no}, ${st.prefix + pg.file}, ${pg.sha256},
+      values (${uuidv7()}, ${cap.document_id}, ${pg.page_no}, ${storageKey}, ${pg.sha256},
               ${pg.bytes}, ${pg.mime}, ${pg.width}, ${pg.height}, ${pg.capture_order})
       on conflict (document_id, page_no) do nothing
     `;
@@ -159,9 +171,111 @@ for (const [shortId, st] of docState) {
 }
 console.log(`documents restored: ${docsRestored}`);
 
+// ── 4. page_move correction 全局回放 ──
+// 人工层 journal/decisions 的完整回放在 m2-07 实现；文档边界不能等到那一步，
+// 否则 split 的目标文档永远只有骨架(A21b)。
+const correctionKeys = (await listKeys('people/'))
+  .filter((key) => /\/correction-\d{4}\.json$/.test(key));
+const pageMoves: Array<{ key: string; sidecar: Extract<ReturnType<typeof CorrectionSidecar.parse>, { kind: 'page_move' }> }> = [];
+for (const key of correctionKeys) {
+  const text = await getText(key);
+  if (!text) continue;
+  const parsed = CorrectionSidecar.safeParse(JSON.parse(text));
+  if (!parsed.success) {
+    reconciliation.push(`非法 correction sidecar: ${key}`);
+    continue;
+  }
+  if (parsed.data.kind === 'page_move') pageMoves.push({ key, sidecar: parsed.data });
+}
+pageMoves.sort((a, b) => correctionSortKey(a.sidecar, a.sidecar.from_doc_short_id)
+  .localeCompare(correctionSortKey(b.sidecar, b.sidecar.from_doc_short_id)));
+
+async function normalizeRebuiltPages(documentId: string): Promise<number> {
+  const rows = await sql`
+    select id from document_page where document_id = ${documentId} order by page_no, id
+  `;
+  if (rows.length > 0) {
+    await sql`update document_page set page_no = page_no + 100000 where document_id = ${documentId}`;
+    for (const [index, row] of rows.entries()) {
+      await sql`update document_page set page_no = ${index + 1} where id = ${row['id'] as string}`;
+    }
+  }
+  await sql`update document set page_count = ${rows.length} where id = ${documentId}`;
+  return rows.length;
+}
+
+let movesReplayed = 0;
+for (let groupStart = 0; groupStart < pageMoves.length;) {
+  const operationId = pageMoves[groupStart]!.sidecar.client_operation_id;
+  let groupEnd = groupStart + 1;
+  while (groupEnd < pageMoves.length
+      && pageMoves[groupEnd]!.sidecar.client_operation_id === operationId) groupEnd += 1;
+  const affected = new Map<string, string>();
+  for (const { key, sidecar: move } of pageMoves.slice(groupStart, groupEnd)) {
+    const source = (await sql`select id from document where short_id = ${move.from_doc_short_id}`)[0];
+    const target = (await sql`select id from document where short_id = ${move.to_doc_short_id}`)[0];
+    if (!source || !target) {
+      reconciliation.push(
+        `page_move 文档骨架缺失: ${move.from_doc_short_id} -> ${move.to_doc_short_id} (${key})`,
+      );
+      continue;
+    }
+    const sourceId = source['id'] as string;
+    const targetId = target['id'] as string;
+    affected.set(sourceId, move.corrected_at);
+    affected.set(targetId, move.corrected_at);
+    let candidates = await sql`
+      select id, page_no from document_page
+      where document_id = ${sourceId} and content_sha256 = ${move.page_sha256}
+        and page_no = ${move.from_page_no}
+    `;
+    if (candidates.length === 0) {
+      candidates = await sql`
+        select id, page_no from document_page
+        where document_id = ${sourceId} and content_sha256 = ${move.page_sha256}
+        order by page_no
+      `;
+    }
+    if (candidates.length === 0) {
+      const alreadyMoved = await sql`
+        select id from document_page
+        where document_id = ${targetId} and content_sha256 = ${move.page_sha256}
+          and page_no = ${move.to_page_no}
+      `;
+      if (alreadyMoved.length > 0) continue;
+      reconciliation.push(`page_move 找不到源页: ${move.page_sha256} (${key})`);
+      continue;
+    }
+    if (candidates.length > 1) {
+      reconciliation.push(`page_move 摘要在源文档内不唯一: ${move.page_sha256} (${key})`);
+      continue;
+    }
+    await sql`
+      update document_page set document_id = ${targetId}, page_no = ${move.to_page_no}
+      where id = ${candidates[0]!['id'] as string}
+    `;
+    movesReplayed += 1;
+  }
+  // 同一次 split/merge 的所有页移动完成后再重排。若逐页重排，重复内容页的
+  // from_page_no 会在操作中途变化，重建可能交换 capture_order 不同的两页。
+  for (const [documentId, correctedAt] of affected) {
+    const count = await normalizeRebuiltPages(documentId);
+    if (count === 0) {
+      await sql`
+        update document set archived_at = coalesce(archived_at, ${correctedAt})
+        where id = ${documentId}
+      `;
+    }
+  }
+  groupStart = groupEnd;
+}
+console.log(`page moves replayed: ${movesReplayed}`);
+
 if (reconciliation.length) {
   console.log('对账报告(需人工处置,不入库):');
   for (const r of reconciliation) console.log('  - ' + r);
 }
-console.log(JSON.stringify({ persons: personKeys.length, documents: docsRestored, reconciliation }));
+console.log(JSON.stringify({
+  persons: personKeys.length, documents: docsRestored, page_moves: movesReplayed, reconciliation,
+}));
 await sql.end();

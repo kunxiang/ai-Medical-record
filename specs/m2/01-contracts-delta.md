@@ -40,7 +40,9 @@ export const GroupingBasis = z.enum(['event_time','capture_date_degraded']);  //
 
 **禁止**修改 `capture.json`(2.0)与 `page-NN.json`(2.0)的 schema 版本语义 —— AI 产出不进 L1。
 
-> **例外且仅此一例**:拆分产生的新文档**必须**写自己的 `capture.json`(§6.2),其 `source='split'`。这不是改 schema,是新增一个合法取值。
+> **例外且仅此一例**:拆分产生的新文档**必须**在以新 `short_id` 命名的元数据目录写自己的
+> `capture.json`(§6.2),其 `source='split'`。`pages[].file` 可以是指向源目录原件的完整 key；
+> 这不是复制或移动原件，也不是修改 schema，只是为 `source` 新增一个合法取值。
 
 ## 4. journal 与 decisions:按"绑不绑人"分流(审核 #004 A-2)
 
@@ -133,6 +135,9 @@ export const CorrectionSidecar = z.discriminatedUnion('kind', [CorrectionPersonR
 ## 7. `ManifestLine` 的边界(审核 #004 B-5)
 
 1. `split` **必须**追加 `ManifestAdd`(`origin='split'`)—— 新文档需要一条 add 行才能被 rebuild 建出骨架。
+   该 add 的 `prefix` 指向新文档自己的元数据目录；其中 `capture.json.pages[].file` 跨前缀引用
+   源目录原件。**禁止**把 `prefix` 指回源目录：WORM key 唯一，同一目录无法同时容纳两份
+   名为 `capture.json` 的对象。
 2. **`merge` 与 `move-page` 禁止写 manifests。** 页归属完全由 `correction-*.json` 承载。
    > 原版 `06 §3.1` 开头写"并在 manifests 追加",而 `ManifestLine` 是 `.strict()` 判别联合、只有 `add | person_correct` 两个 op,新增 op 要同步 contracts + `_meta` 两处 + rebuild —— 而这条代价换不来任何东西:回放已经能从 correction 得到全部页归属信息。
 

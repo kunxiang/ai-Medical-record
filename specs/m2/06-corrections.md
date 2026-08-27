@@ -60,11 +60,15 @@
       > `capture.json` 的目录直接记幽灵行并 `continue` ⇒ 新文档**根本不入库**,A21b 不可能通过。
       > 写 `capture.json` 还保住了 `docs/04 §8` 既有的不变式「每个文档目录必有 capture.json」。
 
-      新 `capture.json` 的取值**必须**是:`source='split'`;`pages` **引用源目录的原 key**(不复制字节);
+      新 `capture.json` 的取值**必须**是:`source='split'`;`pages` **以完整 key 引用源目录原件**(不复制字节);
       `client_document_id` 由 `client_operation_id` 确定性派生(可重放);`captured_at`/`capture_date` = **源文档的值**。
-   c2. 新文档的 **`prefix` = 源文档目录**,`capture_date` = 源文档的 `capture_date`。
-      > 新文档共用源文档的物理前缀,这是 D7"不动原件"的直接后果。由此产生一条与 ADR-047 同构的分离,**必须**写进 spec:
-      > **新文档的 `derived/` 前缀用新 `short_id`,L1 前缀用源 `short_id`;`parseKey` 与月度对账不得假定二者一致。**
+   c2. 新文档的 **`prefix` 使用新 `short_id`**,`capture_date` = 源文档的 `capture_date`。
+      该目录只新增 `capture.json`,不复制 `page-*` 原件或 page sidecar。原件仍由 `pages[].file`
+      指向其既有完整 key。由此产生一条与 ADR-047 同构的分离,**必须**写进 spec:
+      > **新文档的 manifest/capture/derived 前缀用新 `short_id`,但其原件 key 可含源 `short_id`;
+      > `parseKey`、月度对账与运行时代码不得从原件 key 推断当前文档归属。**
+      > 审核 #004 A-12′ 曾写“新文档 prefix = 源目录”，这与同一裁决要求的“新文档自己写
+      > `capture.json`”在 WORM key 唯一条件下不可同时成立；本条是实现期的可执行修正。
    d. `rebuild-index` 的重放顺序 **必须**是:①按 manifests 建文档骨架 → ②读各目录 `capture.json` 恢复页 → ③人工层回放([07](./07-replay.md))→ ④**扫描全部 `correction-*.json`,按 `(corrected_at, from_doc_short_id, seq)` 全局排序后重放 `page_move`**。
       > 排序键修正见 [01](./01-contracts-delta.md) §6.3:该 schema 的时间字段叫 `corrected_at` 不叫 `created_at`,且 `seq` 是目录内计数器、跨目录做次键无意义(审核 #004 B-4)。
    e. 重放 `page_move` 时目标文档若不存在,**必须**由 `to_doc_short_id` 触发建档(其归属取自 c 的 `add` 行)。

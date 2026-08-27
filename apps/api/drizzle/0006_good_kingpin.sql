@@ -1,0 +1,2 @@
+ALTER TABLE "normalization_decision" ADD COLUMN "client_operation_id" uuid;--> statement-breakpoint
+CREATE UNIQUE INDEX "uq_normalization_client_operation" ON "normalization_decision" USING btree ("client_operation_id");

@@ -1,8 +1,26 @@
 [
   {
+    "id": "encounter-suggest",
+    "version": 1,
+    "file": "encounter/encounter-suggest@1.md",
+    "sha256": "9632b31c17d59b37f3e1bec09a4fd2fdb8bff494e5ce8a302c4fb27b625a2178"
+  },
+  {
+    "id": "facility-normalize",
+    "version": 1,
+    "file": "facility/facility-normalize@1.md",
+    "sha256": "0f33b54491bea0333251dc0fe7b582cbf9c220bacabc4e9073e0dcbd3bcf3ef6"
+  },
+  {
     "id": "s1-classify",
     "version": 1,
     "file": "s1/s1-classify@1.md",
     "sha256": "07aa61184a6db0362210b39c19ef30a753a2545a48382d2f858c67c5fe751227"
+  },
+  {
+    "id": "s1-classify",
+    "version": 2,
+    "file": "s1/s1-classify@2.md",
+    "sha256": "bfc1c40643aa7b76538567ae7c0a7ce10c1b80e9c99f8bb582c9b159989307dd"
   }
 ]

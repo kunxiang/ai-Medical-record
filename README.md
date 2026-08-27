@@ -50,4 +50,6 @@
 
 ## 状态
 
-📐 设计阶段 — 尚未开始编码。设计已用一组真实报告验证过一轮。
+✅ **M0/M1 已验收，归档 MVP 已部署测试；M2 AI 元数据与归人正在开发。**
+
+当前可用范围包括注册登录、家庭成员档案、弱网采集与离线队列、WORM 归档、按人/日期浏览、大图查看和账户管理。M2 已有图片 Stage 1、后台作业和归人对账的代码基础，facility 归一、encounter 归组、纠正、回放与总验收仍在推进。详见 [`docs/09-roadmap.md`](./docs/09-roadmap.md) 与 [`agent_wiki/runtime/m2-implementation-status.md`](./agent_wiki/runtime/m2-implementation-status.md)。

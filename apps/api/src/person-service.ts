@@ -1,11 +1,11 @@
 import { eq, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import { z } from 'zod';
-import { PersonSidecar, type PersonSidecarT } from '@amr/contracts';
+import { PersonSidecar, type PersonCreateT, type PersonSidecarT } from '@amr/contracts';
 import { buildKey, canonicalJson, serverTimestamp } from '@amr/storage';
 import { db, type Tx } from './db/client.js';
-import { person, personIdentifier } from './db/schema.js';
-import { appendJournal } from './journal.js';
+import { person, personAccess, personIdentifier } from './db/schema.js';
+import { appendAudit, appendJournal } from './journal.js';
 import { putRewritable } from './s3.js';
 
 /** 从 DB 读出 person 全量快照(含 identifiers),供 sidecar 与 journal 共用。 */
@@ -79,6 +79,41 @@ export async function syncPersonToS3(tx: Tx, personId: string, byAccountId: stri
     person: sidecar,
   }); // 步骤 4
   return sidecar;
+}
+
+/** 创建一个账号所有的档案。调用方负责事务与 slug 冲突重试。 */
+export async function createOwnedPerson(
+  tx: Tx,
+  input: PersonCreateT,
+  accountId: string,
+  slug: string,
+): Promise<PersonSidecarT> {
+  const id = newId();
+  await tx.insert(person).values({
+    id,
+    slug,
+    displayName: input.display_name,
+    namePinyin: input.name_pinyin,
+    birthDate: input.birth_date,
+    sexAtBirth: input.sex_at_birth,
+    gender: input.gender,
+    relationToOwner: input.relation_to_owner,
+    bloodType: input.blood_type,
+    allergies: input.allergies,
+    chronicConditions: input.chronic_conditions,
+    note: input.note,
+  });
+  await tx.insert(personAccess).values({ accountId, personId: id, role: 'owner' });
+  await appendAudit(tx, {
+    schema_version: '1.0',
+    op: 'access_grant',
+    account_id: accountId,
+    person_id: id,
+    person_slug: slug,
+    role: 'owner',
+    at: serverTimestamp(),
+  });
+  return syncPersonToS3(tx, id, accountId);
 }
 
 export function newId(): string {

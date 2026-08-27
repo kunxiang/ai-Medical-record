@@ -69,6 +69,14 @@ SW **只做**外壳预缓存。**无 `sync` 事件处理**(审核 #002 A-8:SW �
 见 [04](./04-offline-queue.md) §5:登录即缓存人员;缓存缺失且离线时允许拍照并置 `pending_person`;`draft/pending_person/pending/failed_terminal` 且未成功 presign 时允许改归属(二次确认)。
 上传时一律传 `confirmed_by: 'capture_ui'`([01](./01-contracts-delta.md) §A1)。
 
+人员选择器提供“添加成员”入口，联网调用 M0 既有 `POST /people`。表单至少收集姓名、与账户所有者关系、出生日期和出生时性别；本人档案由注册流程创建，因此关系不再提供 `self`。创建成功后必须同时：
+
+1. 将新成员加入当前选择器并自动选中；
+2. 持久化 `kv.last_selected_person_id`；
+3. 写入 `people_cache`，且仍只保留 `id / slug / display_name / relation_to_owner` 四项，不得把生日等医疗 PII 带入浏览器人员缓存。
+
+创建需要联网；网络或 API 失败时保留表单内容并给可操作提示，不得伪装成功。
+
 ## 4. 队列状态 UI
 
 常驻角标显示待上传数(= `captures` 中非 `draft` 条数)。展开后每项:本地缩略(objectURL)、归属人、页数、状态、下次重试时间、错误详情。

@@ -1,13 +1,19 @@
 version: 1
-task: initialize-project-wiki
-generated_on: "2026-08-24"
-source_commit: "1c8fbba8b04da0336c9b2fae241afd712e55f302"
+task: m2-ai-metadata-and-reconciliation
+generated_on: "2026-08-26"
+source_commit: "338a4e729f5ae3c22f6505e4caa54eca99c31b66"
+task_document: specs/m2/tasks.md
+required_skill_route: fullstack
 
 source_types:
   - current_code
   - current_tests_and_results
   - design_docs
   - milestone_specs
+  - durable_engineering_wiki
+  - runtime_work_wiki
+  - product_feature_wiki
+  - external_vendor_documentation
 
 expanded_paths:
   - README.md
@@ -25,10 +31,16 @@ expanded_paths:
   - specs/m2/00-scope.md
   - specs/m2/05-reconciliation.md
   - specs/m2/99-acceptance.md
+  - specs/m2/CHANGES.md
+  - specs/m2/tasks.md
   - apps/web/src/App.tsx
   - apps/web/src/features/capture/CaptureView.tsx
   - apps/web/src/features/capture/QueuePanel.tsx
   - apps/web/src/features/browse/BrowseView.tsx
+  - apps/web/src/api/client.ts
+  - apps/web/src/offline/db.ts
+  - apps/web/src/offline/queue.ts
+  - apps/web/src/offline/multipart.ts
   - apps/api/src/access.ts
   - apps/api/src/server.ts
   - apps/api/src/routes/auth.ts
@@ -36,9 +48,34 @@ expanded_paths:
   - apps/api/src/routes/documents.ts
   - apps/api/src/routes/browse.ts
   - apps/api/src/routes/ai.ts
+  - apps/api/src/routes/normalization.ts
+  - apps/api/src/routes/corrections.ts
+  - apps/api/src/routes/multipart.ts
+  - apps/api/src/document-boundaries.ts
+  - apps/api/src/multipart-planning.ts
+  - apps/api/src/pdf-stage1.ts
   - apps/api/src/jobs/queue.ts
   - apps/api/src/jobs/worker.ts
   - apps/api/src/jobs/stage1-handler.ts
+  - apps/api/src/db/schema.ts
+  - apps/api/src/journal.ts
+  - packages/contracts/src/normalization.ts
+  - packages/contracts/src/journal.ts
+  - packages/contracts/src/corrections.ts
+  - packages/contracts/src/document.ts
+  - packages/contracts/src/multipart.ts
+  - packages/contracts/src/sidecars.ts
+  - tools/src/rebuild-index.ts
+  - packages/ai/src/stage1.ts
+  - packages/ai/src/transport.ts
+  - packages/ai/src/deepseek-transport.ts
+  - packages/ai/src/models.ts
+  - packages/ai/src/facility.ts
+  - packages/ai/src/encounter.ts
+  - agent_wiki/architecture-data-and-security.md
+  - agent_wiki/runtime/m2-implementation-status.md
+  - feature_wiki/ai-metadata-and-jobs.md
+  - feature_wiki/capture-archive-and-browse.md
 
 deferred_paths:
   - path: docs/06-ai-pipeline.md
@@ -53,6 +90,10 @@ negative_searches:
     result: none
   - query: "existing agent_wiki or feature_wiki"
     result: none_before_initialization
+  - query: "facility_name_raw|facilityNameRaw outside specs and Stage1Out"
+    result: "no database column or persistence path before M2 implementation"
+  - query: "MCP-LSP TypeScript tools"
+    result: "not exposed in current session; fallback is rg plus pnpm typecheck"
 
 selected_findings:
   - id: architecture-data-layers
@@ -78,6 +119,80 @@ selected_findings:
       apps/api/src/jobs/worker.ts: "1f35a71a55e8acb0f1420c9ca704ee172eb4269e5d9af490214925ed64d4c415"
       apps/api/src/jobs/stage1-handler.ts: "b8e5facda46da55489b73cb76db7ebf88bd5fe1f08d7a588d897b05d48604d8b"
       apps/api/src/routes/ai.ts: "6cd063a7288ce782f1e20743d855b1b9b98615adeb503103ee0d8746f4b63c46"
+  - id: m2-first-implementation-gap
+    relevance: "facility handler requires a persisted raw-name source for deterministic fingerprint reuse and batch backfill."
+    decision: "add document.facility_name_raw as an L2 nullable column before implementing facility_normalize."
+    source_hashes:
+      specs/m2/05-reconciliation.md: "4567a29d307108c5c5c514f025fba5c6e2f537be464a2b02e3f52f9df5bf9780"
+      apps/api/src/db/schema.ts: "5f8dcd7243db911c9555f029db937cab9cb26e17c483551e442953894226fea7"
+      apps/api/src/jobs/stage1-handler.ts: "b8e5facda46da55489b73cb76db7ebf88bd5fe1f08d7a588d897b05d48604d8b"
+  - id: m2-human-operation-idempotency
+    relevance: "archive/ack/reassign append immutable L1 events and therefore require retry-safe operation identity."
+    decision: "persist request/result in the L2 human_operation cache keyed by client_operation_id; bind L1 event_id to the same UUID."
+    status: implemented_in_worktree
+  - id: m2-document-boundaries
+    relevance: "split/merge/move-page 必须在不移动原件的前提下可重建，且移页后不能命中旧预览。"
+    decision: "新 split 文档使用独立元数据目录并跨前缀引用原件；page_move correction 全局回放；边界操作严格删除受影响 derived 前缀。"
+    status: implemented_in_worktree
+  - id: m2-multipart-resume
+    relevance: ">8 MiB 文件必须强制走 multipart，刷新后仅续传缺失 part，complete 后必须证明合并对象的原始整文件 SHA-256。"
+    decision: "presign 对大文件返回空单 PUT URL；DB 持久化 multipart 完成校验锚点，浏览器持久化 UploadId/ETag，complete 由 API GET 回流重算摘要。"
+    status: implemented_in_worktree_awaiting_deployment_and_owner_preview
+  - id: m2-deepseek-vision-provider
+    relevance: "Stage 1 必须同时处理图片/PDF 并返回可本地强校验的结构化输出。"
+    decision: "deepseek-v4-flash-vision-exp 图片/文本走 Responses API json_schema；PDF 走 Anthropic document 兼容层、显式附加 schema 约束并由 Zod 终校验。"
+    evidence: "2026-08-26 账户 /models 包含该模型；非敏感 PNG、医疗图片夹具、PDF 夹具及 Stage1Out schema 均完成供应商探针。"
+
+external_sources:
+  - url: "https://api-docs.deepseek.com/quick_start/pricing/"
+    authority: official_vendor
+    finding: "当前模型表列出 deepseek-v4-flash-vision-exp，并标注 JSON Output、Responses API 与 Anthropic API 支持。"
+  - url: "https://api-docs.deepseek.com/guides/json_mode/"
+    authority: official_vendor
+    finding: "Chat Completions JSON Output 仅保证合法 JSON；严格 schema 优先使用 Responses API json_schema 并保留本地校验。"
+
+implementation_candidates:
+  backend:
+    - apps/api/src/db/schema.ts
+    - apps/api/src/jobs/stage1-handler.ts
+    - apps/api/src/jobs/queue.ts
+    - apps/api/src/jobs/worker.ts
+    - apps/api/src/journal.ts
+    - apps/api/src/routes/ai.ts
+    - apps/api/src/routes/normalization.ts
+    - apps/api/src/routes/corrections.ts
+    - apps/api/src/routes/multipart.ts
+    - apps/api/src/multipart-planning.ts
+    - apps/api/src/server.ts
+  contracts_and_ai:
+    - packages/contracts/src/normalization.ts
+    - packages/contracts/src/journal.ts
+    - packages/contracts/src/jobs.ts
+    - packages/contracts/src/multipart.ts
+    - packages/ai/src/stage1.ts
+    - packages/ai/src/transport.ts
+    - packages/ai/prompts/
+  frontend:
+    - apps/web/src/api/client.ts
+    - apps/web/src/features/browse/BrowseView.tsx
+    - apps/web/src/offline/db.ts
+    - apps/web/src/offline/queue.ts
+    - apps/web/src/offline/multipart.ts
+    - apps/web/src/styles.css
+  recovery_and_acceptance:
+    - tools/src/rebuild-index.ts
+    - tools/src/verify-rebuild.ts
+    - infra/run-m2.sh
+    - specs/m2/RESULTS.md
+
+blocking_unknowns:
+  - "The M2 regression corpus of at least 20 de-identified real documents has not been provided."
+
+invalidations:
+  - finding: "root README says project has not started coding"
+    status: corrected_in_worktree
+  - finding: "M0/M1 manual owner gates remain open"
+    status: superseded_by_owner_acceptance_2026-08-26
 
 wiki_outputs:
   engineering:

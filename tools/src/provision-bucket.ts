@@ -45,6 +45,7 @@ const LIFECYCLE_VERSIONED_EXTRA = {
 // 多放行几个请求头不构成风险,而少放一个要重新拿 admin 凭证 —— 不对称,故取并集。
 const WEB_ORIGINS = (process.env.WEB_ORIGIN ?? 'http://localhost:5173')
   .split(',').map((o) => o.trim()).filter(Boolean);
+const KMS_KEY_ID = process.env.S3_KMS_KEY_ID;
 const CORS_HEADERS = [
   'content-type', 'content-md5',
   'x-amz-checksum-sha256', 'x-amz-sdk-checksum-algorithm',
@@ -122,7 +123,10 @@ async function main(): Promise<void> {
   await s3.send(new PutBucketEncryptionCommand({
     Bucket: BUCKET,
     ServerSideEncryptionConfiguration: {
-      Rules: [{ ApplyServerSideEncryptionByDefault: { SSEAlgorithm: 'aws:kms' } }],
+      Rules: [{ ApplyServerSideEncryptionByDefault: {
+        SSEAlgorithm: 'aws:kms',
+        ...(KMS_KEY_ID ? { KMSMasterKeyID: KMS_KEY_ID } : {}),
+      } }],
     },
   })).then(() => { caps.sse = true; })
     .catch((e) => console.warn('SSE 配置不支持或失败(R2 静态加密默认开启,不可配):', shortMsg(e)));

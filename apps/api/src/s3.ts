@@ -1,19 +1,30 @@
 import {
-  CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand,
-  PutObjectCommand, S3Client, S3ServiceException,
+  CompleteMultipartUploadCommand, CopyObjectCommand, CreateMultipartUploadCommand,
+  DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command,
+  PutObjectCommand, S3Client, S3ServiceException, UploadPartCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { env, LOCK_RETENTION_YEARS, PROBE_RETENTION_MS } from './env.js';
 import { buildKey } from '@amr/storage';
 
-export const s3 = new S3Client({
-  // MinIO 对新版 SDK 默认附加的 CRC32 校验和头返回 501;显式的 ChecksumSHA256 仍会发送
-  requestChecksumCalculation: 'WHEN_REQUIRED',
-  endpoint: env.s3.endpoint,
-  region: env.s3.region,
-  forcePathStyle: true,
-  credentials: { accessKeyId: env.s3.accessKeyId, secretAccessKey: env.s3.secretAccessKey },
-});
+function s3Client(endpoint: string): S3Client {
+  return new S3Client({
+    // MinIO 对新版 SDK 默认附加的 CRC32 校验和头返回 501;显式的 ChecksumSHA256 仍会发送
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    endpoint,
+    region: env.s3.region,
+    forcePathStyle: true,
+    credentials: { accessKeyId: env.s3.accessKeyId, secretAccessKey: env.s3.secretAccessKey },
+  });
+}
+
+export const s3 = s3Client(env.s3.endpoint);
+
+// 服务端对象操作走容器内 endpoint；交给浏览器/外部模型的 URL 必须从公开 endpoint
+// 参与签名。签名后替换 host 会使 SigV4 的 host 签名失效，不能做字符串改写。
+const publicS3 = env.s3.publicEndpoint === env.s3.endpoint
+  ? s3
+  : s3Client(env.s3.publicEndpoint);
 
 const B = env.s3.bucket;
 
@@ -78,6 +89,19 @@ export async function getObjectText(key: string): Promise<{ text: string; etag: 
     if (isStatus(e, 404)) return null;
     throw e;
   }
+}
+
+export async function listKeys(prefix: string): Promise<string[]> {
+  const keys: string[] = [];
+  let continuationToken: string | undefined;
+  do {
+    const result = await s3.send(new ListObjectsV2Command({
+      Bucket: B, Prefix: prefix, ...(continuationToken ? { ContinuationToken: continuationToken } : {}),
+    }));
+    for (const item of result.Contents ?? []) if (item.Key) keys.push(item.Key);
+    continuationToken = result.IsTruncated ? result.NextContinuationToken : undefined;
+  } while (continuationToken);
+  return keys;
 }
 
 /** 追加型 JSONL:读-改-写 + 条件写(If-Match/If-None-Match),412 重试 ≤3(spec m0-03 §5.4)。
@@ -148,6 +172,16 @@ export async function deleteObjectIfPossible(key: string): Promise<void> {
   }
 }
 
+/** 删除可重算的 L2 前缀。与临时上传清理不同，这里失败必须上抛：
+ * 页面重排后继续命中旧 preview 会静默展示错误内容。DeleteObject 本身幂等。 */
+export async function deletePrefix(prefix: string): Promise<number> {
+  const keys = await listKeys(prefix);
+  for (const key of keys) {
+    await s3.send(new DeleteObjectCommand({ Bucket: B, Key: key }));
+  }
+  return keys.length;
+}
+
 /** L2 派生物:普通 PUT,**严禁上锁**(04 §1 权威矩阵)。 */
 export async function putDerivative(key: string, body: Buffer): Promise<void> {
   await s3.send(new PutObjectCommand({ Bucket: B, Key: key, Body: body, ContentType: 'image/webp' }));
@@ -164,22 +198,53 @@ export async function getObjectBytes(key: string): Promise<Buffer | null> {
 }
 
 export async function presignGetKey(key: string, expiresIn = 300): Promise<string> {
-  return getSignedUrl(s3, new GetObjectCommand({ Bucket: B, Key: key }), { expiresIn });
+  return getSignedUrl(publicS3, new GetObjectCommand({ Bucket: B, Key: key }), { expiresIn });
 }
 
 export async function presignPut(key: string, contentType: string, sha256Base64: string): Promise<{ url: string; headers: Record<string, string> }> {
   const cmd = new PutObjectCommand({
     Bucket: B, Key: key, ContentType: contentType, ChecksumSHA256: sha256Base64,
   });
-  const url = await getSignedUrl(s3, cmd, {
+  const url = await getSignedUrl(publicS3, cmd, {
     expiresIn: 900,
     unhoistableHeaders: new Set(['x-amz-checksum-sha256']),
   });
   return { url, headers: { 'Content-Type': contentType, 'x-amz-checksum-sha256': sha256Base64 } };
 }
 
+export async function createMultipartUpload(key: string, contentType: string): Promise<string> {
+  const result = await s3.send(new CreateMultipartUploadCommand({
+    Bucket: B, Key: key, ContentType: contentType,
+  }));
+  if (!result.UploadId) throw new Error('S3 未返回 multipart UploadId');
+  return result.UploadId;
+}
+
+export async function presignMultipartPart(
+  key: string,
+  uploadId: string,
+  partNumber: number,
+): Promise<string> {
+  return getSignedUrl(publicS3, new UploadPartCommand({
+    Bucket: B, Key: key, UploadId: uploadId, PartNumber: partNumber,
+  }), { expiresIn: 900 });
+}
+
+export async function completeMultipartUpload(
+  key: string,
+  uploadId: string,
+  parts: Array<{ partNumber: number; etag: string }>,
+): Promise<void> {
+  await s3.send(new CompleteMultipartUploadCommand({
+    Bucket: B, Key: key, UploadId: uploadId,
+    MultipartUpload: {
+      Parts: parts.map((part) => ({ PartNumber: part.partNumber, ETag: part.etag })),
+    },
+  }));
+}
+
 export async function presignGet(key: string): Promise<string> {
-  return getSignedUrl(s3, new GetObjectCommand({ Bucket: B, Key: key }), { expiresIn: 300 });
+  return getSignedUrl(publicS3, new GetObjectCommand({ Bucket: B, Key: key }), { expiresIn: 300 });
 }
 
 /** 启动探针(spec m0-04 §3):任一断言失败 → 抛错拒绝启动。 */

@@ -21,6 +21,7 @@ export const account = pgTable('account', {
   timezone: text('timezone').notNull().default('Asia/Shanghai'),
   tokenEpoch: integer('token_epoch').notNull().default(0),   // D12:改密码递增 ⇒ 旧 token 失效
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  archivedAt: timestamp('archived_at', { withTimezone: true }),
 });
 
 export const person = pgTable(
@@ -158,6 +159,7 @@ export const document = pgTable(
     columnSet: jsonb('column_set'),
     // ── M2(spec m2-01 §5)。层的标注不是注释,是规范性约束:
     //    verify-rebuild 的字段表必须含全部 L1 人工层列、排除全部 L2 可重算列(m2-99 B13)。
+    facilityNameRaw: text('facility_name_raw'),                               // L2 可重算
     departmentRaw: text('department_raw'),                                   // L2 可重算
     personCheck: text('person_check').notNull().default('unknown'),          // L2 可重算
     /** ★ L1 人工层:归人告警的 ack。**禁止**被任何重算写入或清除 —— 
@@ -173,7 +175,8 @@ export const document = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    check('doc_page_count', sql`page_count >= 1`),
+    // merge 后被吸收文档保留为 0 页软归档记录，供审计与 correction 回放定位。
+    check('doc_page_count', sql`page_count >= 0`),
     check('doc_source', inList('source', DocumentSource.options)),
     check('doc_status', inList('status', DocumentStatus.options)),
     check('doc_type_enum', inList('doc_type', DocType.options)),
@@ -223,8 +226,30 @@ export const uploadFile = pgTable('upload_file', {
   byteSize: bigint('byte_size', { mode: 'number' }).notNull(),
   sha256: text('sha256').notNull(),
   incomingKey: text('incoming_key').notNull().unique(),
+  /** >8 MiB 文件只有 complete 后 GET 回流 sha256 通过才置值；登记路由据此强制 multipart。 */
+  multipartVerifiedAt: timestamp('multipart_verified_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const multipartUpload = pgTable(
+  'multipart_upload',
+  {
+    id: text('id').primaryKey(),                         // S3 返回的 opaque UploadId
+    uploadFileId: uuid('upload_file_id').notNull().references(() => uploadFile.id),
+    storageKey: text('storage_key').notNull(),
+    partCount: integer('part_count').notNull(),
+    state: text('state').notNull().default('pending'),
+    resultSha256: text('result_sha256'),
+    resultByteSize: bigint('result_byte_size', { mode: 'number' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => [
+    check('mu_part_count', sql`part_count >= 2 and part_count <= 10000`),
+    check('mu_state', sql`state in ('pending', 'completed')`),
+    index('idx_multipart_upload_file').on(t.uploadFileId),
+  ],
+);
 
 /** 放弃上报的幂等台账(m1-99 A8):discard_event_id 由客户端持久化,重放只应产生一行 journal。
  *  这是 L2 结构 —— 删库重建后台账为空,重放窗口内可能补出第二行;
@@ -234,6 +259,17 @@ export const captureDiscardEvent = pgTable('capture_discard_event', {
   personId: uuid('person_id').notNull().references(() => person.id),
   clientDocumentId: uuid('client_document_id').notNull(),
   recordedAt: timestamp('recorded_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** M2 人工操作的 DB 幂等缓存。权威事实仍在 L1 journal/audit/correction；
+ *  本表只防止弱网重试重复追加不可删除的事件。 */
+export const humanOperation = pgTable('human_operation', {
+  id: uuid('id').primaryKey(),                         // == client_operation_id
+  kind: text('kind').notNull(),
+  documentId: uuid('document_id').notNull().references(() => document.id),
+  request: jsonb('request').notNull(),
+  result: jsonb('result').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
 // ── M2:后台任务队列(spec m2-04 §2)。属 L2 —— 删库重建后为空,
@@ -281,6 +317,7 @@ export const normalizationDecision = pgTable(
     state: text('state').notNull().default('proposed'),
     decidedBy: uuid('decided_by').references(() => account.id),
     decidedAt: timestamp('decided_at', { withTimezone: true }),
+    clientOperationId: uuid('client_operation_id'),
     promptId: text('prompt_id'),
     promptVersion: integer('prompt_version'),
     model: text('model'),
@@ -290,6 +327,6 @@ export const normalizationDecision = pgTable(
     check('nd_kind', inList('kind', NormalizationKind.options)),
     check('nd_state', inList('state', NormalizationState.options)),
     uniqueIndex('uq_normalization_fingerprint').on(t.inputFingerprint),
+    uniqueIndex('uq_normalization_client_operation').on(t.clientOperationId),
   ],
 );
-

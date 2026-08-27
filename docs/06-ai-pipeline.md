@@ -38,15 +38,15 @@
 
 | 用途 | 模型 | 说明 |
 |---|---|---|
-| 视觉提取、分类、结构化 | **`claude-opus-5`** | $5 / $25 每百万 token;1M 上下文;高分辨率视觉(长边 2576px) |
+| 视觉提取、分类、结构化 | **`deepseek-v4-flash-vision-exp`**(当前测试部署) / `claude-opus-5` | 由 `AI_PROVIDER`/`AI_MODEL` 选择；输出统一经本地 Zod 强校验 |
 | 语音转写 | **独立 ASR 服务** | Claude API **不接受音频输入**,必须单独选型 |
 | 文本 embedding | 独立 embedding 服务 | 用于语义检索 |
 
-### 为什么视觉提取用 Opus 5
+### 视觉提供方选择
 
-- **高分辨率视觉**:长边支持到 2576px(每图最多约 4784 个视觉 token)。化验单的小数点、上下标、密集表格恰恰吃这个分辨率。
-- **结构化输出**:`output_config.format` 用 JSON Schema 约束返回,免去解析与重试逻辑。
-- **中文与手写混排**表现好。
+- DeepSeek 视觉实验模型:图片/文本走 Responses API `json_schema`;PDF 走 Anthropic `document` 兼容层,并附加 schema 约束。
+- Anthropic: 保留原生 `output_config.format`、服务端 fallback 与流式提额路径。
+- 无论提供方,最终输出都必须通过 `Stage1Out` 本地校验;实验模型返回合法 JSON 不等于符合业务 schema。
 
 ### ASR 选型(待定,需实测)
 
@@ -130,7 +130,7 @@ const meta = response.parsed_output!;
 
 - **`cache_control` 放在稳定的 system prompt 上。** 最小可缓存前缀约 **1024 token**(不足则静默不缓存),提取 prompt 一定超过。缓存命中后这部分只按 0.1× 计价。渲染顺序是 `tools` → `system` → `messages`,易变内容(每次不同的图、请求 id)必须排在最后一个 `cache_control` 断点之后。
 - **图片用预签名 URL**,不用 base64 —— 后者让请求体膨胀 1/3。
-- **送进模型的必须是 L2 派生物,不是原件(ADR-050)。** Claude **不解析图片元数据**,原件里的 EXIF `Orientation` 会被完全忽略 —— Orientation=6 的照片会以横躺姿势进入模型。派生物在生成时已按 Orientation 旋正。
+- **送进模型的必须是 L2 派生物,不是原件(ADR-050)。** 视觉模型不会依靠原件 EXIF `Orientation` 自动旋正;Orientation=6 的照片可能以横躺姿势进入模型。派生物在生成时已按 Orientation 旋正。
 - **图在文字之前。** 官方指引:image 块排在 text 块前面效果最好。
 - **PDF 不是 image。** 图片格式仅限 JPEG/PNG/GIF/WebP;PDF 必须走 `document` 块(base64,单请求 32 MB / 600 页上限)。
 - 日期一律要求 `YYYY-MM-DD`,解析失败置 null 而非猜测。

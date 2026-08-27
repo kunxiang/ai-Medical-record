@@ -3,8 +3,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Stage1OutT } from '@amr/contracts';
 import { MODEL } from '../src/models.js';
-import { buildS1Request, callS1, callS1Once, S1Error } from '../src/stage1.js';
-import { setTransport, type BetaMessage } from '../src/transport.js';
+import {
+  buildS1PdfRequest, buildS1Request, callS1, callS1Once, callS1PdfOnce, S1Error,
+} from '../src/stage1.js';
+import { setStreamTransport, setTransport, type BetaMessage } from '../src/transport.js';
 
 afterEach(() => setTransport(null));
 
@@ -75,7 +77,7 @@ describe('callS1 的失败处置(m2-02 §5)', () => {
     const r = await callS1Once(P);
     expect(r.model).toBe('some-fallback-model');
     expect(r.usage.cache_read_input_tokens).toBe(900);
-    expect(r.promptVersion).toBe(1);
+    expect(r.promptVersion).toBe(2);
   });
 
   it('refusal ⇒ 终态,记录 category,且**不重试**', async () => {
@@ -91,13 +93,15 @@ describe('callS1 的失败处置(m2-02 §5)', () => {
   });
 
   it('max_tokens ⇒ 以 32000 重试恰一次', async () => {
-    const calls: number[] = [];
-    setTransport(async (p) => {
-      calls.push(p.max_tokens);
-      return calls.length === 1 ? reply({ stop_reason: 'max_tokens' }) : reply();
-    });
+    const regular = vi.fn(async () => reply({ stop_reason: 'max_tokens' }));
+    const streamed = vi.fn(async () => reply());
+    setTransport(regular);
+    setStreamTransport(streamed);
     const r = await callS1(P);
-    expect(calls).toEqual([16000, 32000]);
+    expect(regular).toHaveBeenCalledTimes(1);
+    expect(regular.mock.calls[0]![0].max_tokens).toBe(16000);
+    expect(streamed).toHaveBeenCalledTimes(1);
+    expect(streamed.mock.calls[0]![0].max_tokens).toBe(32000);
     expect(r.output.doc_type).toBe('lab_report');
   });
 
@@ -123,5 +127,48 @@ describe('callS1 的失败处置(m2-02 §5)', () => {
   it('响应无文本块 ⇒ no_text_block,不静默返回空', async () => {
     setTransport(async () => reply({ content: [] }));
     await callS1Once(P).catch((e: S1Error) => expect(e.failure.kind).toBe('no_text_block'));
+  });
+});
+
+describe('PDF document-block(m2-99 A14b/A26)', () => {
+  const pdf = { data: 'JVBERi0xLjQK', pageCount: 3 };
+
+  it('PDF 使用单个 base64 document 块，不走 image 块', () => {
+    const request = buildS1PdfRequest(pdf, 16000);
+    const content = request.messages[0]!.content as Array<{
+      type: string;
+      source?: { type?: string; media_type?: string; data?: string };
+    }>;
+    expect(content[0]).toEqual({
+      type: 'document',
+      source: { type: 'base64', media_type: 'application/pdf', data: pdf.data },
+    });
+    expect(content.some((block) => block.type === 'image')).toBe(false);
+  });
+
+  it('接受完整的 PDF 内部页序 1/2/3', async () => {
+    setTransport(async () => reply({
+      content: [{ type: 'text', text: JSON.stringify({
+        ...OUT,
+        pages: [1, 2, 3].map((pageNo) => ({
+          page_no: pageNo, page_label: null, page_index: null,
+          page_total: 3, full_text: `p${pageNo}`,
+        })),
+      }) }],
+    }));
+    const result = await callS1PdfOnce(pdf);
+    expect(result.output.pages.map((page) => page.page_no)).toEqual([1, 2, 3]);
+  });
+
+  it('PDF 漏页或重号进入 invalid_output', async () => {
+    setTransport(async () => reply({
+      content: [{ type: 'text', text: JSON.stringify({
+        ...OUT,
+        pages: [OUT.pages[0], { ...OUT.pages[0], page_no: 3 }],
+      }) }],
+    }));
+    await callS1PdfOnce(pdf).catch((error: S1Error) => {
+      expect(error.failure.kind).toBe('invalid_output');
+    });
   });
 });

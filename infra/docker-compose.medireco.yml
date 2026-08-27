@@ -1,0 +1,120 @@
+name: ai-medical-record
+
+services:
+  postgres:
+    image: mirror.gcr.io/library/postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: amr
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: amr
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - amr-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U amr -d amr"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  minio:
+    image: mirror.gcr.io/minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9101"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_KMS_SECRET_KEY: ${MINIO_KMS_SECRET_KEY}
+      MINIO_API_CORS_ALLOW_ORIGIN: ${WEB_ORIGIN}
+    ports:
+      - "127.0.0.1:19000:9000"
+      - "127.0.0.1:19101:9101"
+    volumes:
+      - amr-minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  api:
+    image: ai-medical-record-local:latest
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.local
+      args:
+        VITE_API_BASE: https://api.medireco.eckstein.pro
+    restart: unless-stopped
+    command: ["node", "apps/api/dist/main.js"]
+    env_file:
+      - .env.local
+    environment:
+      DATABASE_URL: postgres://amr:${POSTGRES_PASSWORD}@postgres:5432/amr
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: https://s3.medireco.eckstein.pro
+      S3_BUCKET: medical-record
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      AUTH_SECRET: ${AUTH_SECRET}
+      WEB_ORIGIN: ${WEB_ORIGIN}
+      AI_JOB_WORKER: "1"
+      AI_JOB_CONCURRENCY: "2"
+      PORT: "8300"
+    ports:
+      - "127.0.0.1:18300:8300"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:8300/__container_health').then(r=>process.exit(r.status===404?0:1)).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  web:
+    image: ai-medical-record-web-local:latest
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.web
+      args:
+        VITE_API_BASE: https://api.medireco.eckstein.pro
+    restart: unless-stopped
+    command:
+      - pnpm
+      - --filter
+      - "@amr/web"
+      - exec
+      - vite
+      - preview
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5173"
+      - --strictPort
+    ports:
+      - "127.0.0.1:15173:5173"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:5173/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  amr-postgres-data:
+  amr-minio-data:

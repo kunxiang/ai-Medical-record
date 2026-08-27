@@ -21,3 +21,6 @@ export function newPersonSlug(): string {
 export function newDocShortId(): string {
   return 'd' + randomChars(5);
 }
+export function newFacilitySlug(): string {
+  return 'f' + randomChars(5);
+}

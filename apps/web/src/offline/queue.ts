@@ -1,10 +1,12 @@
 import { uuidv7 } from 'uuidv7';
+import { MULTIPART_THRESHOLD_BYTES } from '@amr/contracts';
 import { api, ApiFailure, auth } from '../api/client.js';
 import {
   allCaptures, blobsOf, deleteCaptureCompletely, getCapture, putCapture,
   type CaptureRecord,
 } from './db.js';
 import { checkPause } from './pause.js';
+import { missingPartNumbers, partByteRange, saveCompletedPart } from './multipart.js';
 
 // spec m1-04 §2–§5:状态机、错误三段分类、退避、前台驱动。
 
@@ -58,6 +60,9 @@ function classify(stage: Stage, err: unknown): { disposition: Disposition; code:
     return { disposition: 'terminal', code, message };        // 未列举的 4xx
   }
   if (err instanceof S3PutFailure) {
+    if (err.preserveBatch && (err.status === 403 || err.status === 404)) {
+      return { disposition: 'retry', code: `s3_${err.status}`, message: err.message };
+    }
     if (err.status === 403) return { disposition: 'repres1gn', code: 's3_expired', message: err.message };
     if (err.status === 400) return { disposition: 'terminal', code: 's3_bad_request', message: err.message };
     if (err.status >= 500) return { disposition: 'retry', code: 's3_5xx', message: err.message };
@@ -68,7 +73,7 @@ function classify(stage: Stage, err: unknown): { disposition: Disposition; code:
 }
 
 class S3PutFailure extends Error {
-  constructor(readonly status: number, message: string) {
+  constructor(readonly status: number, message: string, readonly preserveBatch = false) {
     super(message);
   }
 }
@@ -79,7 +84,7 @@ async function applyFailure(rec: CaptureRecord, stage: Stage, err: unknown): Pro
 
   if (disposition === 'paused') {
     // 不增 attempt(避免耗尽重试预算)
-    await putCapture({ ...rec, state: 'pending', batch: null, last_error });
+    await putCapture({ ...rec, state: 'pending', last_error });
     if (code === 'person_unavailable') events.onPersonUnavailable?.(rec.person_id ?? '');
     else {
       auth.clear();
@@ -99,7 +104,7 @@ async function applyFailure(rec: CaptureRecord, stage: Stage, err: unknown): Pro
   }
   const attempt = rec.attempt + 1;
   await putCapture({
-    ...rec, state: 'pending', batch: null, attempt,
+    ...rec, state: 'pending', attempt,
     next_attempt_at: Date.now() + backoffMs(attempt), last_error,
   });
 }
@@ -114,41 +119,113 @@ async function processOne(rec: CaptureRecord): Promise<void> {
     return;
   }
 
-  // ① presign(在上传时取 —— 预签名 15 分钟、批次 24 小时过期,m1-04 §2.2)
+  // ① presign。已有 multipart 进度时必须复用原 batch；upload_file.id 是服务端续传锚点。
   let batch: NonNullable<CaptureRecord['batch']>;
-  try {
-    await checkPause('presign');
-    const res = await api.presign({
-      person_id: rec.person_id,
-      files: blobs.map((b) => ({
-        filename: b.filename, mime_type: b.mime_type, byte_size: b.byte_size, sha256: b.sha256,
-      })),
-    });
-    batch = {
-      batch_id: res.batch_id,
-      uploads: res.uploads.map((u, i) => ({
-        page_no: blobs[i]!.page_no, upload_id: u.upload_id, url: u.url,
-        headers: u.headers, expires_at: u.expires_at,
-      })),
-    };
-  } catch (e) {
-    await applyFailure(rec, 'presign', e);
-    return;
+  const reusable = rec.batch !== null
+    && rec.batch.uploads.length === blobs.length
+    && rec.batch.uploads.every((upload) => blobs.some((blob) => blob.page_no === upload.page_no));
+  if (reusable) {
+    batch = rec.batch!;
+  } else {
+    try {
+      await checkPause('presign');
+      const res = await api.presign({
+        person_id: rec.person_id,
+        files: blobs.map((b) => ({
+          filename: b.filename, mime_type: b.mime_type, byte_size: b.byte_size, sha256: b.sha256,
+        })),
+      });
+      batch = {
+        batch_id: res.batch_id,
+        uploads: res.uploads.map((u, i) => ({
+          page_no: blobs[i]!.page_no, upload_id: u.upload_id, mode: u.mode, url: u.url,
+          headers: u.headers, expires_at: u.expires_at,
+        })),
+      };
+    } catch (e) {
+      await applyFailure(rec, 'presign', e);
+      return;
+    }
   }
 
-  await putCapture({ ...rec, state: 'uploading', batch });
-  events.onChange?.();   // 状态进 uploading 必须让视图跟上:否则"改归属"按钮还挂在那儿(m1-99 A11)
+  let working: CaptureRecord = { ...rec, state: 'uploading', batch };
+  const saveProgress = async () => {
+    working = { ...working, state: 'uploading', batch };
+    await putCapture(working);
+    events.onChange?.();
+  };
+  await saveProgress();
 
-  // ② 直传(整文件单 PUT;分片续传见 D14)
+  // ②a. 小文件先全部单 PUT。这样一旦开始 multipart，混合文档中的小文件已经完成，
+  // 刷新后不需要为同一 batch 另造重新签名接口。
   try {
     for (const up of batch.uploads) {
+      const b = blobs.find((blob) => blob.page_no === up.page_no)!;
+      if (b.byte_size > MULTIPART_THRESHOLD_BYTES || up.single_completed) continue;
+      if (up.mode !== 'single' || up.url === null) throw new Error('小文件缺少单 PUT URL');
       await checkPause('put');
-      const b = blobs.find((x) => x.page_no === up.page_no)!;
       const res = await fetch(up.url, { method: 'PUT', headers: up.headers, body: b.blob });
       if (!res.ok) throw new S3PutFailure(res.status, `S3 PUT ${res.status}`);
+      up.single_completed = true;
+      await saveProgress();
+    }
+
+    // ②b. 大文件固定 8 MiB 分片。只把 UploadId 与已完成 ETag 写入 IndexedDB；
+    // URL 每轮按缺失 part 重新签，刷新和 15 分钟过期都不会丢已完成分片。
+    for (const up of batch.uploads) {
+      const b = blobs.find((blob) => blob.page_no === up.page_no)!;
+      if (b.byte_size <= MULTIPART_THRESHOLD_BYTES) continue;
+      if (!up.multipart) {
+        const created = await api.multipartCreate(up.upload_id);
+        up.multipart = { ...created, parts: [], completed: false };
+        await saveProgress();
+      }
+      const multipart = up.multipart;
+      if (multipart.completed) continue;
+      const missing = missingPartNumbers(multipart.part_count, multipart.parts);
+      if (missing.length > 0) {
+        const signed = await api.multipartSign(multipart.upload_id, missing);
+        for (const part of signed.parts.sort((a, b2) => a.part_number - b2.part_number)) {
+          const range = partByteRange(part.part_number, multipart.part_size, b.byte_size);
+          const body = b.blob.slice(range.start, range.end);
+          const response = await fetch(part.url, { method: 'PUT', body });
+          if (!response.ok) {
+            if (response.status === 404) {
+              up.multipart = undefined;
+              await saveProgress();
+            }
+            throw new S3PutFailure(response.status, `S3 multipart PUT ${response.status}`, true);
+          }
+          const etag = response.headers.get('etag');
+          if (!etag) throw new S3PutFailure(400, 'S3 multipart 响应未暴露 ETag', true);
+          multipart.parts = saveCompletedPart(
+            multipart.parts, { part_number: part.part_number, etag },
+          );
+          await saveProgress();
+          await checkPause('put');
+        }
+      }
+      let completedResult;
+      try {
+        completedResult = await api.multipartComplete(multipart.upload_id, multipart.parts);
+      } catch (error) {
+        if (error instanceof ApiFailure && error.code === 'upload_incomplete') {
+          // 生命周期清理或无效 ETag 只淘汰当前文件的 UploadId；同批小文件与其他
+          // multipart 的 ETag 仍然有效，不能清空整个 batch 重新上传。
+          up.multipart = undefined;
+          await saveProgress();
+          throw new S3PutFailure(404, error.message, true);
+        }
+        throw error;
+      }
+      if (completedResult.sha256 !== b.sha256 || completedResult.byte_size !== b.byte_size) {
+        throw new Error('服务端 multipart 整文件校验结果与本地原件不一致');
+      }
+      multipart.completed = true;
+      await saveProgress();
     }
   } catch (e) {
-    await applyFailure({ ...rec, batch }, 'put', e);
+    await applyFailure({ ...working, batch }, 'put', e);
     return;
   }
 
@@ -221,7 +298,9 @@ export async function discardCapture(id: string): Promise<void> {
 export async function retryTerminal(id: string): Promise<void> {
   const rec = await getCapture(id);
   if (!rec || rec.state !== 'failed_terminal') return;
-  await putCapture({ ...rec, state: 'pending', attempt: 0, next_attempt_at: 0, last_error: null });
+  await putCapture({
+    ...rec, state: 'pending', batch: null, attempt: 0, next_attempt_at: 0, last_error: null,
+  });
   events.onChange?.();
   void tick('manual-retry');
 }
