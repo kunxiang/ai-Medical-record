@@ -125,7 +125,7 @@ export function db(): Promise<IDBPDatabase<AmrDB>> {
   return dbPromise ?? openCaptureDb();
 }
 
-async function withDb<T>(operation: (connection: IDBPDatabase<AmrDB>) => Promise<T>): Promise<T> {
+export async function withDb<T>(operation: (connection: IDBPDatabase<AmrDB>) => Promise<T>): Promise<T> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const connection = await db();
     try {

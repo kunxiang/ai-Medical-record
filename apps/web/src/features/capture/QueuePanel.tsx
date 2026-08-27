@@ -19,10 +19,12 @@ import { cn } from '../../ui/cn.js';
 function QueueThumbnails({
   clientDocumentId,
   pageCount,
+  version,
   onOpenPreview,
 }: {
   clientDocumentId: string;
   pageCount: number;
+  version: number;
   onOpenPreview: (blobs: BlobRecord[], index: number) => void;
 }) {
   const [blobs, setBlobs] = useState<BlobRecord[]>([]);
@@ -55,7 +57,7 @@ function QueueThumbnails({
         if (u) URL.revokeObjectURL(u);
       }
     };
-  }, [clientDocumentId, pageCount]);
+  }, [clientDocumentId, pageCount, version]);
 
   if (blobs.length === 0) return null;
 
@@ -110,6 +112,7 @@ export function QueuePanel({
 }): JSX.Element {
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [uploadingAll, setUploadingAll] = useState(false);
+  const [queueVersion, setQueueVersion] = useState(0);
   const [modalState, setModalState] = useState<{
     open: boolean;
     blobs: BlobRecord[];
@@ -221,6 +224,7 @@ export function QueuePanel({
                 <QueueThumbnails
                   clientDocumentId={q.client_document_id}
                   pageCount={q.page_count}
+                  version={queueVersion}
                   onOpenPreview={(blobs, idx) => {
                     setModalState({
                       open: true,
@@ -318,6 +322,7 @@ export function QueuePanel({
             const { blobsOf } = await import('../../offline/db.js');
             const updatedBlobs = await blobsOf(modalState.docId, modalState.blobs.length);
             setModalState((prev) => (prev ? { ...prev, blobs: updatedBlobs } : null));
+            setQueueVersion((v) => v + 1);
             await onChanged();
           }}
           onDelete={async () => {

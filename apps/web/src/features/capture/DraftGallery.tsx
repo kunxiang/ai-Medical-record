@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Camera, CheckCircle2, Eye, FileText, Images, Loader2,
   Plus, RotateCcw, RotateCw, Trash2, UploadCloud, Sparkles,
@@ -7,8 +7,6 @@ import type { BlobRecord } from '../../offline/db.js';
 import { blobsOf } from '../../offline/db.js';
 import { rotateDraftPage, deleteDraftPage } from '../../offline/capture.js';
 import { Button } from '../../ui/Button.js';
-import { IconButton } from '../../ui/IconButton.js';
-import { Card } from '../../ui/Card.js';
 import { DraftPreviewModal } from './DraftPreviewModal.js';
 import { cn } from '../../ui/cn.js';
 
@@ -38,42 +36,47 @@ export function DraftGallery({
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [busyPage, setBusyPage] = useState<number | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    let createdUrls: string[] = [];
-
-    async function loadBlobs() {
-      setLoading(true);
-      try {
-        const records = await blobsOf(draftId, pageCount);
-        if (cancelled) return;
-        const newItems: PageItem[] = records.map((r) => {
-          let url: string | null = null;
-          if (r.mime_type !== 'application/pdf') {
-            url = URL.createObjectURL(r.blob);
-            createdUrls.push(url);
-          }
-          return { record: r, url };
-        });
-        setItems(newItems);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+  const loadBlobs = useCallback(async () => {
+    setLoading(true);
+    try {
+      const records = await blobsOf(draftId, pageCount);
+      const newItems: PageItem[] = records.map((r) => {
+        let url: string | null = null;
+        if (r.mime_type !== 'application/pdf') {
+          url = URL.createObjectURL(r.blob);
+        }
+        return { record: r, url };
+      });
+      setItems((prev) => {
+        // Clean up previous URLs
+        for (const it of prev) {
+          if (it.url) URL.revokeObjectURL(it.url);
+        }
+        return newItems;
+      });
+    } finally {
+      setLoading(false);
     }
-
-    void loadBlobs();
-
-    return () => {
-      cancelled = true;
-      for (const u of createdUrls) URL.revokeObjectURL(u);
-    };
   }, [draftId, pageCount]);
+
+  useEffect(() => {
+    void loadBlobs();
+    return () => {
+      setItems((prev) => {
+        for (const it of prev) {
+          if (it.url) URL.revokeObjectURL(it.url);
+        }
+        return [];
+      });
+    };
+  }, [loadBlobs]);
 
   async function handleRotate(pageNo: number, deg: 90 | -90) {
     if (busyPage !== null) return;
     setBusyPage(pageNo);
     try {
       await rotateDraftPage(draftId, pageNo, deg);
+      await loadBlobs();
       await onDraftChanged();
     } finally {
       setBusyPage(null);
@@ -84,7 +87,13 @@ export function DraftGallery({
     if (busyPage !== null) return;
     setBusyPage(pageNo);
     try {
-      await deleteDraftPage(draftId, pageNo);
+      const remaining = await deleteDraftPage(draftId, pageNo);
+      if (!remaining || remaining.page_count === 0) {
+        setPreviewIndex(null);
+        setItems([]);
+      } else {
+        await loadBlobs();
+      }
       await onDraftChanged();
     } finally {
       setBusyPage(null);
@@ -188,7 +197,7 @@ export function DraftGallery({
               const isBusy = busyPage === item.record.page_no;
               return (
                 <div
-                  key={item.record.page_no}
+                  key={`${item.record.page_no}-${item.record.sha256}`}
                   className="group relative flex flex-col bg-white rounded-2xl border border-emerald-200/90 shadow-sm hover:shadow-md transition-all overflow-hidden"
                 >
                   {/* Thumbnail stage */}
@@ -205,6 +214,7 @@ export function DraftGallery({
                       </div>
                     ) : item.url ? (
                       <img
+                        key={item.record.sha256}
                         src={item.url}
                         alt={`第 ${item.record.page_no} 页`}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
@@ -286,7 +296,7 @@ export function DraftGallery({
       </div>
 
       {/* Fullscreen Draft Preview & Rotation Modal */}
-      {previewIndex !== null && (
+      {previewIndex !== null && previewIndex < items.length && (
         <DraftPreviewModal
           open={previewIndex !== null}
           blobs={items.map((it) => it.record)}

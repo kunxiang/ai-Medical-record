@@ -2,7 +2,7 @@ import { uuidv7 } from 'uuidv7';
 import { MAX_UPLOAD_BYTES } from '@amr/contracts';
 import {
   blobsOf, deleteCaptureCompletely, getBlob, getCapture, putBlob, putCapture,
-  type BlobRecord, type CaptureRecord,
+  withDb, type BlobRecord, type CaptureRecord,
 } from './db.js';
 
 // spec m1-05 §3。核心纪律:原件字节零改动 —— 不解码、不重编码、不旋转、不剥 EXIF。
@@ -34,76 +34,6 @@ async function pdfSize(blob: Blob): Promise<{ width: number; height: number }> {
   return { width: Math.max(1, Math.round(page.getWidth())), height: Math.max(1, Math.round(page.getHeight())) };
 }
 
-/** 自动将带 EXIF 方向标签的图片旋转为正立 */
-export async function normalizeExifOrientation(
-  blob: Blob,
-  orientation: number | null | undefined,
-): Promise<{ blob: Blob; width: number; height: number }> {
-  if (!orientation || orientation <= 1) {
-    const bmp = await createImageBitmap(blob);
-    const size = { width: bmp.width, height: bmp.height };
-    bmp.close();
-    return { blob, width: size.width, height: size.height };
-  }
-
-  const bmp = await createImageBitmap(blob);
-  const srcW = bmp.width;
-  const srcH = bmp.height;
-  const isSwap = orientation >= 5 && orientation <= 8;
-  const destW = isSwap ? srcH : srcW;
-  const destH = isSwap ? srcW : srcH;
-
-  const canvas = document.createElement('canvas');
-  canvas.width = destW;
-  canvas.height = destH;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('无法创建画布进行方向纠正');
-
-  switch (orientation) {
-    case 2: // 水平镜像
-      ctx.translate(destW, 0);
-      ctx.scale(-1, 1);
-      break;
-    case 3: // 180度
-      ctx.translate(destW, destH);
-      ctx.rotate(Math.PI);
-      break;
-    case 4: // 垂直镜像
-      ctx.translate(0, destH);
-      ctx.scale(1, -1);
-      break;
-    case 5: // 90度逆时针 + 水平镜像
-      ctx.rotate(0.5 * Math.PI);
-      ctx.scale(1, -1);
-      break;
-    case 6: // 90度顺时针(手机垂直拍照最常见)
-      ctx.rotate(0.5 * Math.PI);
-      ctx.translate(0, -srcH);
-      break;
-    case 7: // 90度顺时针 + 水平镜像
-      ctx.rotate(0.5 * Math.PI);
-      ctx.translate(destW, -srcH);
-      ctx.scale(-1, 1);
-      break;
-    case 8: // 90度逆时针 (270度顺时针)
-      ctx.rotate(-0.5 * Math.PI);
-      ctx.translate(-srcW, 0);
-      break;
-    default:
-      break;
-  }
-
-  ctx.drawImage(bmp, 0, 0);
-  bmp.close();
-
-  const mime = blob.type === 'image/png' ? 'image/png' : 'image/jpeg';
-  const newBlob = await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('纠正方向失败'))), mime, 0.95);
-  });
-
-  return { blob: newBlob, width: destW, height: destH };
-}
-
 /** 旋转 Blob 指定角度(90, -90, 180, 270) */
 export async function rotateBlob(
   blob: Blob,
@@ -111,34 +41,44 @@ export async function rotateBlob(
 ): Promise<{ blob: Blob; width: number; height: number }> {
   const normDeg = ((degrees % 360) + 360) % 360;
   if (normDeg === 0) {
-    const bmp = await createImageBitmap(blob);
-    const size = { width: bmp.width, height: bmp.height };
-    bmp.close();
+    const size = await imageSize(blob);
     return { blob, width: size.width, height: size.height };
   }
 
-  const bmp = await createImageBitmap(blob);
-  const isSwap = normDeg === 90 || normDeg === 270;
-  const destW = isSwap ? bmp.height : bmp.width;
-  const destH = isSwap ? bmp.width : bmp.height;
+  const imgUrl = URL.createObjectURL(blob);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error('无法加载图片以进行旋转'));
+      el.src = imgUrl;
+    });
 
-  const canvas = document.createElement('canvas');
-  canvas.width = destW;
-  canvas.height = destH;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('无法创建画布进行旋转');
+    const srcW = img.naturalWidth;
+    const srcH = img.naturalHeight;
+    const isSwap = normDeg === 90 || normDeg === 270;
+    const destW = isSwap ? srcH : srcW;
+    const destH = isSwap ? srcW : srcH;
 
-  ctx.translate(destW / 2, destH / 2);
-  ctx.rotate((normDeg * Math.PI) / 180);
-  ctx.drawImage(bmp, -bmp.width / 2, -bmp.height / 2);
-  bmp.close();
+    const canvas = document.createElement('canvas');
+    canvas.width = destW;
+    canvas.height = destH;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('无法创建画布进行旋转');
 
-  const mime = blob.type === 'image/png' ? 'image/png' : 'image/jpeg';
-  const newBlob = await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('旋转图片失败'))), mime, 0.95);
-  });
+    ctx.translate(destW / 2, destH / 2);
+    ctx.rotate((normDeg * Math.PI) / 180);
+    ctx.drawImage(img, -srcW / 2, -srcH / 2);
 
-  return { blob: newBlob, width: destW, height: destH };
+    const mime = blob.type === 'image/png' ? 'image/png' : 'image/jpeg';
+    const newBlob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('旋转图片失败'))), mime, 0.95);
+    });
+
+    return { blob: newBlob, width: destW, height: destH };
+  } finally {
+    URL.revokeObjectURL(imgUrl);
+  }
 }
 
 export interface PreparedPage {
@@ -152,7 +92,7 @@ export interface PreparedPage {
   exif: { captured_at: string | null; orientation: number | null } | null;
 }
 
-/** 入队前的全部准备:校验 → 物化 Blob → EXIF 解析/自动正向 → 摘要 → 尺寸。任何拒绝都在这里发生。 */
+/** 入队前的全部准备:校验 → 物化 Blob → 摘要 → 尺寸 → EXIF(原件零改动)。任何拒绝都在这里发生。 */
 export async function preparePage(file: File): Promise<PreparedPage> {
   const mime = file.type.toLowerCase().split(';')[0]!.trim();
   if (!MIME_WHITELIST.has(mime)) {
@@ -171,14 +111,15 @@ export async function preparePage(file: File): Promise<PreparedPage> {
   // ★ 物化为 Blob:File 携带宿主文件引用,相机/相册的临时文件被系统回收后
   //   跨会话读取会抛 NotFoundError,而此时 UI 早已告诉用户"已存档"(审核 #002 A-9)
   const bytes = await file.arrayBuffer();
-  let workingBlob = new Blob([bytes], { type: mime });
+  const blob = new Blob([bytes], { type: mime });
+
+  const [sha, size] = await Promise.all([
+    sha256Hex(blob),
+    mime === 'application/pdf' ? pdfSize(blob) : imageSize(blob),
+  ]);
 
   let exif: PreparedPage['exif'] = null;
-  let size: { width: number; height: number };
-
-  if (mime === 'application/pdf') {
-    size = await pdfSize(workingBlob);
-  } else {
+  if (mime !== 'application/pdf') {
     let exifr: (typeof import('exifr'))['default'];
     try {
       ({ default: exifr } = await import('exifr'));
@@ -187,37 +128,25 @@ export async function preparePage(file: File): Promise<PreparedPage> {
     }
 
     try {
+      // 纯解析,不改动源字节
+      // orientation 必须走专用入口:pick 模式下 IFD0 的 Orientation 取不到
       const [parsed, ori] = await Promise.all([
-        exifr.parse(workingBlob, { pick: ['DateTimeOriginal'] }) as Promise<Record<string, unknown> | undefined>,
-        exifr.orientation(workingBlob).catch(() => undefined) as Promise<number | undefined>,
+        exifr.parse(blob, { pick: ['DateTimeOriginal'] }) as Promise<Record<string, unknown> | undefined>,
+        exifr.orientation(blob).catch(() => undefined) as Promise<number | undefined>,
       ]);
       const dto = parsed?.['DateTimeOriginal'] as Date | undefined;
-      const rawOri = typeof ori === 'number' ? ori : null;
       exif = {
         captured_at: dto instanceof Date && !Number.isNaN(dto.getTime()) ? dto.toISOString() : null,
-        orientation: rawOri,
+        orientation: typeof ori === 'number' ? ori : null,
       };
-
-      // 自动纠正 EXIF 导致的旋转，使图片正立保存在本地
-      if (rawOri && rawOri > 1) {
-        const normalized = await normalizeExifOrientation(workingBlob, rawOri);
-        workingBlob = normalized.blob;
-        size = { width: normalized.width, height: normalized.height };
-        exif.orientation = 1;
-      } else {
-        size = await imageSize(workingBlob);
-      }
     } catch {
       exif = null;
-      size = await imageSize(workingBlob);
     }
   }
 
-  const sha = await sha256Hex(workingBlob);
-
   return {
-    blob: workingBlob,
-    byte_size: workingBlob.size,
+    blob,
+    byte_size: blob.size,
     sha256: sha,
     mime_type: mime,
     width: size.width,
@@ -322,7 +251,6 @@ export async function deleteDraftPage(
   const rec = await getCapture(clientDocumentId);
   if (!rec || rec.state !== 'draft') throw new Error('只能删除草稿中的页面');
 
-  const { blobsOf, deleteCaptureCompletely } = await import('./db.js');
   const blobs = await blobsOf(clientDocumentId, rec.page_count);
   const remaining = blobs.filter((b) => b.page_no !== pageNo);
 
@@ -331,24 +259,32 @@ export async function deleteDraftPage(
     return undefined;
   }
 
-  await deleteCaptureCompletely(clientDocumentId, rec.page_count);
-  for (let i = 0; i < remaining.length; i++) {
-    const pageNum = i + 1;
-    const b = remaining[i]!;
-    await putBlob({
-      ...b,
-      page_no: pageNum,
-      capture_order: pageNum,
-    });
-  }
+  await withDb(async (connection) => {
+    const tx = connection.transaction(['blobs', 'captures'], 'readwrite');
+    const blobStore = tx.objectStore('blobs');
+    for (let p = 1; p <= rec.page_count; p++) {
+      await blobStore.delete([clientDocumentId, p]);
+    }
+    for (let i = 0; i < remaining.length; i++) {
+      const pageNum = i + 1;
+      const b = remaining[i]!;
+      await blobStore.put({
+        ...b,
+        page_no: pageNum,
+        capture_order: pageNum,
+      });
+    }
+    const updatedRec: CaptureRecord = {
+      ...rec,
+      page_count: remaining.length,
+      batch: null,
+      next_attempt_at: 0,
+    };
+    await tx.objectStore('captures').put(updatedRec);
+    await tx.done;
+  });
 
-  const updatedRec: CaptureRecord = {
-    ...rec,
-    page_count: remaining.length,
-    batch: null,
-  };
-  await putCapture(updatedRec);
-  return updatedRec;
+  return await getCapture(clientDocumentId);
 }
 
 /** "完成"动作:draft → pending(有归属人)或 pending_person(无) */
