@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { EncounterProposal, FacilityProposal, type DocumentListItemT, type NormalizationDecisionT } from '@amr/contracts';
 import {
   AlertTriangle, Archive, Building2, CalendarDays, Check, ChevronLeft, ChevronRight, Clock3,
-  FileImage, FileText, LoaderCircle, MapPin, Maximize2, RotateCcw, ShieldCheck, Trash2,
+  FileImage, FileText, LoaderCircle, MapPin, Maximize2, RotateCcw, RotateCw, ShieldCheck, Trash2,
   UploadCloud, UserRoundCog, X,
 } from 'lucide-react';
 import { uuidv7 } from 'uuidv7';
@@ -240,6 +240,12 @@ export function BrowseView({
     },
     [people, person],
   );
+
+  const [viewerRotation, setViewerRotation] = useState(0);
+
+  useEffect(() => {
+    setViewerRotation(0);
+  }, [viewer?.doc.id, viewer?.page]);
 
   useEffect(() => {
     if (!viewer) return;
@@ -745,6 +751,26 @@ export function BrowseView({
 
                 <button
                   type="button"
+                  onClick={() => setViewerRotation((r) => (r - 90 + 360) % 360)}
+                  aria-label="向左旋转90度"
+                  className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+                  title="向左旋转90度"
+                >
+                  <RotateCcw size={19} />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setViewerRotation((r) => (r + 90) % 360)}
+                  aria-label="向右旋转90度"
+                  className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+                  title="向右旋转90度"
+                >
+                  <RotateCw size={19} />
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => void toggleArchive(viewer.doc)}
                   disabled={documentAction}
                   aria-label={viewer.doc.archived_at ? '恢复文档' : '归档文档'}
@@ -801,7 +827,8 @@ export function BrowseView({
                     src={`${derivativeUrl(viewer.doc.id, viewer.page, 'preview')}?access_token=${encodeURIComponent(auth.get() ?? '')}`}
                     alt={`${DOC_TYPE_LABEL[viewer.doc.doc_type] ?? '医疗记录'}第 ${viewer.page} 页`}
                     data-testid="viewer-image"
-                    className="max-w-full max-h-full object-contain rounded-lg shadow-2xl animate-in zoom-in-95 duration-150"
+                    style={{ transform: viewerRotation ? `rotate(${viewerRotation}deg)` : undefined }}
+                    className="max-w-full max-h-full object-contain rounded-lg shadow-2xl transition-transform duration-200 animate-in zoom-in-95"
                   />
                 )}
               </div>

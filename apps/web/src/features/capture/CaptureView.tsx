@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import {
   Camera, CheckCircle2, FileStack, Images, LockKeyhole, ShieldCheck,
-  Sparkles, UploadCloud,
+  Sparkles, UploadCloud, ArrowRight,
 } from 'lucide-react';
 import type { CreatePersonInput } from '../../api/client.js';
 import type { Person } from '../../App.js';
@@ -10,6 +10,7 @@ import { ensureRoomFor } from '../../offline/persist.js';
 import type { CaptureRecord } from '../../offline/db.js';
 import { QueuePanel } from './QueuePanel.js';
 import { CreatePersonDialog } from './CreatePersonDialog.js';
+import { DraftGallery } from './DraftGallery.js';
 import { tick } from '../../offline/queue.js';
 import { PageHeader } from '../../ui/PageHeader.js';
 import { PersonSelector } from '../../ui/PersonSelector.js';
@@ -39,6 +40,7 @@ export function CaptureView({
   const [draftPages, setDraftPages] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [creatingPerson, setCreatingPerson] = useState(false);
+  const [uploadingAll, setUploadingAll] = useState(false);
 
   const pending = queue.filter((q) => q.state !== 'draft');
   const needsPerson = queue.filter((q) => q.state === 'pending_person');
@@ -51,7 +53,7 @@ export function CaptureView({
       for (const file of Array.from(files)) {
         const room = await ensureRoomFor(file.size);
         if (!room.ok) throw new CaptureRejected(room.reason!);
-        const page = await preparePage(file); // 校验 + 物化 Blob + 摘要 + 尺寸 + EXIF
+        const page = await preparePage(file); // 校验 + 自动方向纠正 + 物化 Blob + 摘要 + 尺寸
         const rec = await appendDraftPage({
           draftId: activeDraftId,
           person: selected ? { id: selected.id, slug: selected.slug, display_name: selected.display_name } : null,
@@ -75,6 +77,16 @@ export function CaptureView({
     setDraftPages(0);
     await onQueueChanged();
     void tick('after-finalize');
+  }
+
+  async function handleUploadAll(): Promise<void> {
+    setUploadingAll(true);
+    try {
+      await tick('user-action-upload-all');
+      await onQueueChanged();
+    } finally {
+      setUploadingAll(false);
+    }
   }
 
   return (
@@ -104,6 +116,62 @@ export function CaptureView({
         </Alert>
       )}
 
+      {/* Prominent Pending Uploads Callout Banner */}
+      {pending.length > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-3xl bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-teal-500/10 border-2 border-amber-500/40 shadow-lg shadow-amber-500/5 animate-in fade-in duration-200">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-md shadow-amber-600/30">
+              <UploadCloud size={24} className="animate-pulse" />
+            </div>
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-amber-500 text-white">
+                  待上传
+                </span>
+                <strong className="text-base font-bold text-slate-900">
+                  当前设备有 {pending.length} 份记录等待上传
+                </strong>
+              </div>
+              <p className="text-xs text-slate-600">保持页面打开即可自动上传；若需立即触发请点击右侧按钮。</p>
+            </div>
+          </div>
+          <Button
+            variant="primary"
+            size="md"
+            disabled={uploadingAll}
+            loading={uploadingAll}
+            onClick={() => void handleUploadAll()}
+            data-testid="btn-upload-all"
+            iconLeft={!uploadingAll ? <UploadCloud size={16} /> : undefined}
+            className="bg-amber-600 hover:bg-amber-500 text-white font-bold px-5 py-2.5 rounded-xl shadow-md cursor-pointer shrink-0"
+          >
+            ⚡ 立即上传全部 ({pending.length})
+          </Button>
+        </div>
+      )}
+
+      {/* Draft Page Pre-Upload Preview Gallery & Rotation */}
+      {draftId && draftPages > 0 && (
+        <DraftGallery
+          draftId={draftId}
+          pageCount={draftPages}
+          onDraftChanged={async () => {
+            const { getCapture } = await import('../../offline/db.js');
+            const rec = await getCapture(draftId);
+            if (!rec || rec.page_count === 0) {
+              setDraftId(null);
+              setDraftPages(0);
+            } else {
+              setDraftPages(rec.page_count);
+            }
+            await onQueueChanged();
+          }}
+          onFinish={finish}
+          onAddCamera={() => cameraRef.current?.click()}
+          onAddAlbum={() => albumRef.current?.click()}
+        />
+      )}
+
       {/* Capture Studio */}
       <Card className="space-y-5">
         <div className="flex items-center gap-3 pb-3 border-b border-line/60">
@@ -112,12 +180,12 @@ export function CaptureView({
           </div>
           <div>
             <h2 className="text-base sm:text-lg font-bold text-ink leading-snug">
-              {draftPages > 0 ? '继续添加这一份记录' : '添加医疗文件'}
+              {draftPages > 0 ? '继续向当前草稿添加页面' : '添加医疗文件'}
             </h2>
             <p className="text-xs text-muted leading-tight">
               {draftPages > 0
-                ? `草稿已安全保存 ${draftPages} 页，可以继续拍摄或完成归档。`
-                : '支持照片、相册多选和 PDF，单个文件最大 50 MiB。'}
+                ? `已保存 ${draftPages} 页，可继续拍摄或选择相册加页。`
+                : '支持拍照（自动纠正方向）、相册多选和 PDF，单个文件最大 50 MiB。'}
             </p>
           </div>
         </div>
@@ -155,25 +223,23 @@ export function CaptureView({
             className={cn(
               'group relative flex items-center justify-between p-5 rounded-2xl border text-left transition-all duration-200 cursor-pointer',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2',
-              'bg-brand-500 hover:bg-brand-600 active:bg-brand-700 text-white border-brand-600/50 shadow-brand',
+              'bg-gradient-to-br from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 active:from-emerald-700 active:to-teal-800 text-white border-emerald-600/50 shadow-brand',
             )}
           >
             <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+              <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center shrink-0 shadow-inner">
                 <Camera size={26} />
               </div>
               <div className="space-y-0.5">
                 <strong className="text-base font-bold block">
-                  {draftPages > 0 ? '继续拍照' : '拍照采集'}
+                  {draftPages > 0 ? '继续拍照加页' : '拍照采集'}
                 </strong>
-                <span className="text-xs text-white/80 block">
-                  {draftPages > 0 ? `已保存 ${draftPages} 页` : '适合纸质病历与报告'}
+                <span className="text-xs text-white/85 block">
+                  {draftPages > 0 ? `已保存 ${draftPages} 页` : '支持自动正向与单页旋转'}
                 </span>
               </div>
             </div>
-            <span className="text-xl font-bold text-white/70 group-hover:translate-x-1 transition-transform">
-              →
-            </span>
+            <ArrowRight className="text-xl font-bold text-white/80 group-hover:translate-x-1 transition-transform" size={20} />
           </button>
 
           <button
@@ -183,7 +249,7 @@ export function CaptureView({
             className={cn(
               'group relative flex items-center justify-between p-5 rounded-2xl border text-left transition-all duration-200 cursor-pointer',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2',
-              'bg-white hover:bg-brand-50/40 active:bg-brand-100/50 text-ink border-line hover:border-brand-300 shadow-soft',
+              'bg-white hover:bg-slate-50 active:bg-slate-100 text-ink border-line hover:border-brand-300 shadow-soft',
             )}
           >
             <div className="flex items-center gap-4">
@@ -192,40 +258,12 @@ export function CaptureView({
               </div>
               <div className="space-y-0.5">
                 <strong className="text-base font-bold block">相册 / PDF</strong>
-                <span className="text-xs text-muted block">支持一次选择多个文件</span>
+                <span className="text-xs text-muted block">支持一次选择多个文件与预览</span>
               </div>
             </div>
-            <span className="text-xl font-bold text-muted group-hover:text-brand-600 group-hover:translate-x-1 transition-all">
-              →
-            </span>
+            <ArrowRight className="text-xl font-bold text-muted group-hover:text-brand-600 group-hover:translate-x-1 transition-all" size={20} />
           </button>
         </div>
-
-        {draftPages > 0 && (
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl bg-brand-50 border border-brand-200/80 shadow-xs animate-in fade-in duration-200">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-brand-500 text-white flex items-center justify-center shrink-0 shadow-2xs">
-                <FileStack size={20} />
-              </div>
-              <div>
-                <strong className="text-sm font-bold text-brand-900 block">
-                  当前草稿 · {draftPages} 页
-                </strong>
-                <span className="text-xs text-brand-700">每一页都已保存在本机</span>
-              </div>
-            </div>
-            <Button
-              variant="primary"
-              size="md"
-              onClick={() => void finish()}
-              iconLeft={<CheckCircle2 size={17} />}
-              data-testid="btn-finish"
-              className="rounded-xl self-stretch sm:self-auto shadow-sm"
-            >
-              完成这份({draftPages} 页)
-            </Button>
-          </div>
-        )}
 
         {error && (
           <Alert variant="danger" data-testid="capture-error">

@@ -1,17 +1,101 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  CalendarDays, Camera, CheckCircle2, CircleAlert, FileStack,
-  RefreshCw, Trash2, UploadCloud,
+  CalendarDays, Camera, CheckCircle2, CircleAlert, Eye, FileStack, FileText,
+  Loader2, RefreshCw, Trash2, UploadCloud,
 } from 'lucide-react';
 import type { Person } from '../../App.js';
-import type { CaptureRecord } from '../../offline/db.js';
-import { discardCapture, retryTerminal } from '../../offline/queue.js';
+import type { BlobRecord, CaptureRecord } from '../../offline/db.js';
+import { blobsOf } from '../../offline/db.js';
+import { rotateDraftPage } from '../../offline/capture.js';
+import { discardCapture, retryTerminal, tick } from '../../offline/queue.js';
 import { Card } from '../../ui/Card.js';
 import { Button } from '../../ui/Button.js';
 import { QueueStateBadge } from '../../ui/Badge.js';
 import { Alert } from '../../ui/Alert.js';
 import { EmptyState } from '../../ui/EmptyState.js';
+import { DraftPreviewModal } from './DraftPreviewModal.js';
 import { cn } from '../../ui/cn.js';
+
+function QueueThumbnails({
+  clientDocumentId,
+  pageCount,
+  onOpenPreview,
+}: {
+  clientDocumentId: string;
+  pageCount: number;
+  onOpenPreview: (blobs: BlobRecord[], index: number) => void;
+}) {
+  const [blobs, setBlobs] = useState<BlobRecord[]>([]);
+  const [urls, setUrls] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let created: string[] = [];
+
+    async function load() {
+      const records = await blobsOf(clientDocumentId, pageCount);
+      if (cancelled) return;
+      setBlobs(records);
+      const uList = records.map((r) => {
+        if (r.mime_type !== 'application/pdf') {
+          const u = URL.createObjectURL(r.blob);
+          created.push(u);
+          return u;
+        }
+        return '';
+      });
+      setUrls(uList);
+    }
+
+    void load();
+
+    return () => {
+      cancelled = true;
+      for (const u of created) {
+        if (u) URL.revokeObjectURL(u);
+      }
+    };
+  }, [clientDocumentId, pageCount]);
+
+  if (blobs.length === 0) return null;
+
+  return (
+    <div className="flex items-center gap-2 pt-2 overflow-x-auto pb-1">
+      {blobs.map((b, idx) => (
+        <button
+          key={b.page_no}
+          type="button"
+          onClick={() => onOpenPreview(blobs, idx)}
+          className="group relative w-14 h-18 rounded-lg overflow-hidden border border-line/80 hover:border-brand-500 bg-slate-100 shrink-0 cursor-pointer shadow-2xs transition-all"
+          title={`点击大图预览第 ${b.page_no} 页`}
+        >
+          {b.mime_type === 'application/pdf' ? (
+            <div className="w-full h-full flex flex-col items-center justify-center p-1 bg-slate-50 text-slate-400">
+              <FileText size={18} className="text-brand-500" />
+              <span className="text-[9px] font-bold">PDF</span>
+            </div>
+          ) : urls[idx] ? (
+            <img
+              src={urls[idx]}
+              alt={`第 ${b.page_no} 页`}
+              className="w-full h-full object-cover group-hover:scale-110 transition-transform"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center">
+              <Loader2 size={12} className="animate-spin text-slate-400" />
+            </div>
+          )}
+          <span className="absolute bottom-0 inset-x-0 bg-slate-900/80 text-white text-[9px] font-bold text-center py-0.5">
+            P.{b.page_no}
+          </span>
+          <div className="absolute inset-0 bg-slate-900/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+            <Eye size={14} className="text-white" />
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export function QueuePanel({
   queue,
@@ -25,6 +109,13 @@ export function QueuePanel({
   onChanged: () => Promise<void>;
 }): JSX.Element {
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [uploadingAll, setUploadingAll] = useState(false);
+  const [modalState, setModalState] = useState<{
+    open: boolean;
+    blobs: BlobRecord[];
+    docId: string;
+    index: number;
+  } | null>(null);
 
   if (queue.length === 0) {
     return (
@@ -32,24 +123,47 @@ export function QueuePanel({
         variant="card"
         icon={<CheckCircle2 size={28} className="text-success" />}
         title="队列为空，全部已上传"
-        description="新采集的文件会在这里显示上传进度。"
+        description="新采集的文件会在这里显示上传进度与预览。"
         data-testid="queue-empty"
       />
     );
   }
 
+  async function handleUploadAll() {
+    setUploadingAll(true);
+    try {
+      await tick('user-action-queue-panel');
+      await onChanged();
+    } finally {
+      setUploadingAll(false);
+    }
+  }
+
   return (
     <Card className="space-y-4" data-testid="queue-panel">
-      <div className="flex items-center justify-between pb-2 border-b border-line/60">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-line/60">
         <div>
           <span className="text-xs font-bold text-brand-600 tracking-wider uppercase">
             离线队列
           </span>
-          <h2 className="text-lg font-bold text-ink tracking-tight">上传进度</h2>
+          <h2 className="text-lg font-bold text-ink tracking-tight">待上传与进度管理</h2>
         </div>
-        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-brand-50 text-brand-700 border border-brand-200/60">
-          <UploadCloud size={15} /> {queue.length} 项
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-brand-50 text-brand-700 border border-brand-200/60">
+            <UploadCloud size={15} /> {queue.length} 份记录
+          </span>
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={uploadingAll}
+            loading={uploadingAll}
+            onClick={() => void handleUploadAll()}
+            iconLeft={<UploadCloud size={14} />}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold"
+          >
+            立即上传全部
+          </Button>
+        </div>
       </div>
 
       <ul className="space-y-3">
@@ -102,6 +216,20 @@ export function QueuePanel({
                     </span>
                   )}
                 </div>
+
+                {/* Page Thumbnails & Preview */}
+                <QueueThumbnails
+                  clientDocumentId={q.client_document_id}
+                  pageCount={q.page_count}
+                  onOpenPreview={(blobs, idx) => {
+                    setModalState({
+                      open: true,
+                      blobs,
+                      docId: q.client_document_id,
+                      index: idx,
+                    });
+                  }}
+                />
               </div>
             </div>
 
@@ -109,7 +237,6 @@ export function QueuePanel({
               <Alert
                 variant="danger"
                 className="mt-3 py-2 px-3 text-xs"
-                icon={<CircleAlert size={15} />}
                 data-testid={`queue-error-${q.client_document_id}`}
               >
                 <span>
@@ -178,6 +305,32 @@ export function QueuePanel({
           </li>
         ))}
       </ul>
+
+      {/* Modal for previewing/rotating queued items */}
+      {modalState?.open && (
+        <DraftPreviewModal
+          open={modalState.open}
+          blobs={modalState.blobs}
+          initialIndex={modalState.index}
+          onClose={() => setModalState(null)}
+          onRotate={async (pageNo, deg) => {
+            await rotateDraftPage(modalState.docId, pageNo, deg);
+            const { blobsOf } = await import('../../offline/db.js');
+            const updatedBlobs = await blobsOf(modalState.docId, modalState.blobs.length);
+            setModalState((prev) => (prev ? { ...prev, blobs: updatedBlobs } : null));
+            await onChanged();
+          }}
+          onDelete={async () => {
+            setModalState(null);
+          }}
+          onFinish={async () => {
+            await tick('modal-finish');
+            setModalState(null);
+            await onChanged();
+          }}
+          finishing={false}
+        />
+      )}
     </Card>
   );
 }
