@@ -80,9 +80,17 @@ interface AmrDB extends DBSchema {
 }
 
 let dbPromise: Promise<IDBPDatabase<AmrDB>> | null = null;
+let activeDb: IDBPDatabase<AmrDB> | null = null;
 
-export function db(): Promise<IDBPDatabase<AmrDB>> {
-  dbPromise ??= openDB<AmrDB>('amr-capture', 1, {
+function invalidateDb(connection: IDBPDatabase<AmrDB>): void {
+  if (activeDb !== connection) return;
+  activeDb = null;
+  dbPromise = null;
+}
+
+function openCaptureDb(): Promise<IDBPDatabase<AmrDB>> {
+  let opened: IDBPDatabase<AmrDB> | null = null;
+  const opening = openDB<AmrDB>('amr-capture', 1, {
     upgrade(d) {
       const captures = d.createObjectStore('captures', { keyPath: 'client_document_id' });
       captures.createIndex('idx_state', 'state');
@@ -91,57 +99,97 @@ export function db(): Promise<IDBPDatabase<AmrDB>> {
       d.createObjectStore('people_cache', { keyPath: 'id' });
       d.createObjectStore('kv', { keyPath: 'k' });
     },
+    blocking() {
+      if (!opened) return;
+      invalidateDb(opened);
+      opened.close();
+    },
+    terminated() {
+      if (opened) invalidateDb(opened);
+    },
   });
-  return dbPromise;
+  dbPromise = opening;
+  void opening.then(
+    (connection) => {
+      opened = connection;
+      if (dbPromise === opening) activeDb = connection;
+    },
+    () => {
+      if (dbPromise === opening) dbPromise = null;
+    },
+  );
+  return opening;
+}
+
+export function db(): Promise<IDBPDatabase<AmrDB>> {
+  return dbPromise ?? openCaptureDb();
+}
+
+async function withDb<T>(operation: (connection: IDBPDatabase<AmrDB>) => Promise<T>): Promise<T> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const connection = await db();
+    try {
+      return await operation(connection);
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'InvalidStateError' && attempt === 0)) throw error;
+      // Chrome 在终止连接与派发 close 事件之间仍可能把旧连接交给调用方。
+      // 只对 IDBDatabase.transaction 的关闭态错误重开一次；持续失败必须原样暴露。
+      invalidateDb(connection);
+      connection.close();
+    }
+  }
+  throw new Error('IndexedDB 连接重开后仍不可用');
 }
 
 export async function kvGet<T>(k: string): Promise<T | undefined> {
-  const row = await (await db()).get('kv', k);
+  const row = await withDb((connection) => connection.get('kv', k));
   return row?.v as T | undefined;
 }
 export async function kvSet(k: string, v: unknown): Promise<void> {
-  await (await db()).put('kv', { k, v });
+  await withDb((connection) => connection.put('kv', { k, v }));
 }
 
 /** 2xx 后:同一个跨两 store 的事务里删除元数据与 blob(m1-04 §2.5)。
  *  ⚠️ 网络调用必须在事务之外完成 —— IDB 事务在让出事件循环时自动提交。 */
 export async function deleteCaptureCompletely(id: string, pageCount: number): Promise<void> {
-  const d = await db();
-  const tx = d.transaction(['captures', 'blobs'], 'readwrite');
-  await tx.objectStore('captures').delete(id);
-  const blobs = tx.objectStore('blobs');
-  for (let p = 1; p <= pageCount; p++) await blobs.delete([id, p]);
-  await tx.done;
+  await withDb(async (connection) => {
+    const tx = connection.transaction(['captures', 'blobs'], 'readwrite');
+    await tx.objectStore('captures').delete(id);
+    const blobs = tx.objectStore('blobs');
+    for (let p = 1; p <= pageCount; p++) await blobs.delete([id, p]);
+    await tx.done;
+  });
 }
 
 export async function putCapture(rec: CaptureRecord): Promise<void> {
-  await (await db()).put('captures', rec);
+  await withDb((connection) => connection.put('captures', rec));
 }
 export async function getCapture(id: string): Promise<CaptureRecord | undefined> {
-  return (await db()).get('captures', id);
+  return withDb((connection) => connection.get('captures', id));
 }
 export async function allCaptures(): Promise<CaptureRecord[]> {
-  return (await db()).getAll('captures');
+  return withDb((connection) => connection.getAll('captures'));
 }
 
 /** 注销账户后的设备清理。只有服务端已经确认注销后才能调用：
  * captures/blobs 可能是尚未上传的唯一副本，普通退出登录绝不能清除。 */
 export async function clearAllLocalData(): Promise<void> {
-  const d = await db();
-  const tx = d.transaction(['captures', 'blobs', 'people_cache', 'kv'], 'readwrite');
-  await Promise.all([
-    tx.objectStore('captures').clear(),
-    tx.objectStore('blobs').clear(),
-    tx.objectStore('people_cache').clear(),
-    tx.objectStore('kv').clear(),
-  ]);
-  await tx.done;
+  await withDb(async (connection) => {
+    const tx = connection.transaction(['captures', 'blobs', 'people_cache', 'kv'], 'readwrite');
+    await Promise.all([
+      tx.objectStore('captures').clear(),
+      tx.objectStore('blobs').clear(),
+      tx.objectStore('people_cache').clear(),
+      tx.objectStore('kv').clear(),
+    ]);
+    await tx.done;
+  });
 }
 export async function getBlob(id: string, pageNo: number): Promise<BlobRecord | undefined> {
-  return (await db()).get('blobs', [id, pageNo]);
+  return withDb((connection) => connection.get('blobs', [id, pageNo]));
 }
 export async function putBlob(rec: BlobRecord): Promise<void> {
-  await (await db()).put('blobs', rec);
+  await withDb((connection) => connection.put('blobs', rec));
 }
 export async function blobsOf(id: string, pageCount: number): Promise<BlobRecord[]> {
   const out: BlobRecord[] = [];
@@ -155,19 +203,37 @@ export async function blobsOf(id: string, pageCount: number): Promise<BlobRecord
 /** 崩溃恢复:uploading/registering 回退 pending。multipart 的 UploadId 与已完成 ETag
  * 必须保留；否则刷新会把真正的断点续传退化成整文件重传。 */
 export async function recoverAfterRestart(): Promise<number> {
-  const d = await db();
-  const tx = d.transaction('captures', 'readwrite');
-  let n = 0;
-  for await (const cursor of tx.store) {
-    const rec = cursor.value;
-    if (rec.state === 'uploading' || rec.state === 'registering') {
-      const resumable = rec.batch?.uploads.some((upload) => upload.multipart) ?? false;
-      await cursor.update({
-        ...rec, state: 'pending', batch: resumable ? rec.batch : null, next_attempt_at: 0,
-      });
-      n += 1;
+  return withDb(async (connection) => {
+    const tx = connection.transaction('captures', 'readwrite');
+    let n = 0;
+    for await (const cursor of tx.store) {
+      const rec = cursor.value;
+      if (rec.state === 'uploading' || rec.state === 'registering') {
+        const resumable = rec.batch?.uploads.some((upload) => upload.multipart) ?? false;
+        await cursor.update({
+          ...rec, state: 'pending', batch: resumable ? rec.batch : null, next_attempt_at: 0,
+        });
+        n += 1;
+      }
     }
-  }
-  await tx.done;
-  return n;
+    await tx.done;
+    return n;
+  });
+}
+
+export async function allCachedPeople(): Promise<PersonCacheRecord[]> {
+  return withDb((connection) => connection.getAll('people_cache'));
+}
+
+export async function replaceCachedPeople(people: PersonCacheRecord[]): Promise<void> {
+  await withDb(async (connection) => {
+    const tx = connection.transaction('people_cache', 'readwrite');
+    await tx.store.clear();
+    for (const person of people) await tx.store.put(person);
+    await tx.done;
+  });
+}
+
+export async function putCachedPerson(person: PersonCacheRecord): Promise<void> {
+  await withDb((connection) => connection.put('people_cache', person));
 }

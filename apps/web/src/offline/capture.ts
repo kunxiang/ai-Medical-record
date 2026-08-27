@@ -1,6 +1,6 @@
 import { uuidv7 } from 'uuidv7';
 import { MAX_UPLOAD_BYTES } from '@amr/contracts';
-import { db, putBlob, putCapture, type BlobRecord, type CaptureRecord } from './db.js';
+import { getCapture, putBlob, putCapture, type BlobRecord, type CaptureRecord } from './db.js';
 
 // spec m1-05 §3。核心纪律:原件字节零改动 —— 不解码、不重编码、不旋转、不剥 EXIF。
 
@@ -109,9 +109,8 @@ export async function appendDraftPage(args: {
   page: PreparedPage;
   source: 'camera' | 'album' | 'pdf';
 }): Promise<CaptureRecord> {
-  const d = await db();
   const id = args.draftId ?? uuidv7();
-  const existing = await d.get('captures', id);
+  const existing = await getCapture(id);
   const pageNo = (existing?.page_count ?? 0) + 1;
 
   const blobRec: BlobRecord = {
@@ -148,7 +147,7 @@ export async function appendDraftPage(args: {
 
 /** "完成"动作:draft → pending(有归属人)或 pending_person(无) */
 export async function finalizeDraft(id: string): Promise<CaptureRecord | undefined> {
-  const rec = await (await db()).get('captures', id);
+  const rec = await getCapture(id);
   if (!rec || rec.state !== 'draft') return rec;
   const next: CaptureRecord = {
     ...rec,
@@ -164,7 +163,7 @@ export async function reassignQueued(
   id: string,
   person: { id: string; slug: string; display_name: string },
 ): Promise<void> {
-  const rec = await (await db()).get('captures', id);
+  const rec = await getCapture(id);
   if (!rec) return;
   if (!['draft', 'pending_person', 'pending', 'failed_terminal'].includes(rec.state)) {
     throw new Error('该项已开始上传,归属人不可更改(key 已由 person 决定)');

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Archive, Camera, CircleUserRound, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { api, auth, type CreatePersonInput } from './api/client.js';
 import {
-  allCaptures, clearAllLocalData, db, kvGet, kvSet, recoverAfterRestart,
+  allCachedPeople, allCaptures, clearAllLocalData, kvGet, kvSet, putCachedPerson,
+  recoverAfterRestart, replaceCachedPeople,
   type CaptureRecord, type PersonCacheRecord,
 } from './offline/db.js';
 import { configureQueue, pauseQueue, resumeQueue, startQueueDriver } from './offline/queue.js';
@@ -37,7 +38,7 @@ export function App(): JSX.Element {
       const status = await requestPersistence();
       setPersisted(status.persisted || (await lastPersistStatus()));
 
-      const cached = await (await db()).getAll('people_cache');
+      const cached = await allCachedPeople();
       setPeople(cached);
       const lastId = await kvGet<string>('last_selected_person_id');
       setSelected(cached.find((p) => p.id === lastId) ?? cached[0] ?? null);
@@ -67,11 +68,7 @@ export function App(): JSX.Element {
         const slim: Person[] = res.people.map((p) => ({
           id: p.id, slug: p.slug, display_name: p.display_name, relation_to_owner: p.relation_to_owner,
         }));   // ★ 只缓存四项:选择器不需要过敏史/生日(医疗 PII)
-        const d = await db();
-        const tx = d.transaction('people_cache', 'readwrite');
-        await tx.store.clear();
-        for (const p of slim) await tx.store.put(p);
-        await tx.done;
+        await replaceCachedPeople(slim);
         await kvSet('people_fetched_at', new Date().toISOString());
         setPeople(slim);
         setSelected((cur) => cur ?? slim[0] ?? null);
@@ -105,7 +102,7 @@ export function App(): JSX.Element {
       display_name: created.display_name,
       relation_to_owner: created.relation_to_owner,
     };
-    await (await db()).put('people_cache', slim);
+    await putCachedPerson(slim);
     await kvSet('last_selected_person_id', slim.id);
     setPeople((current) => [...current.filter((person) => person.id !== slim.id), slim]);
     setSelected(slim);
