@@ -1,0 +1,153 @@
+/**
+ * MediReco Design System Tokens (Tailwind CSS v4 + Modern CSS Variables)
+ *
+ * Medical & Personal Health Record Archive aesthetic:
+ * - High readability, accessible contrast, tranquil clinical jade & emerald tones.
+ * - Glassmorphism, refined micro-elevation, and hardware-accelerated transitions.
+ */
+
+:root {
+  /* Font Family & Typography */
+  --font-family-base: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-family-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  /* Core Medical Jade / Teal Brand Palette */
+  --brand-50: #f0f8f6;
+  --brand-100: #daf0ea;
+  --brand-200: #b5e1d5;
+  --brand-300: #84cebe;
+  --brand-400: #49b5a2;
+  --brand-500: #14766d; /* Core Primary */
+  --brand-600: #0e6159;
+  --brand-700: #0a4e48;
+  --brand-800: #083e39;
+  --brand-900: #062b27;
+  --brand-950: #021614;
+
+  /* Semantic Brand Aliases */
+  --brand: var(--brand-500);
+  --brand-deep: var(--brand-700);
+  --brand-soft: #e8f4f1;
+  --brand-accent: #23a093;
+  --brand-glow: rgba(20, 118, 109, 0.18);
+  --brand-glow-subtle: rgba(20, 118, 109, 0.08);
+
+  /* Typography & Ink Colors */
+  --ink: #142725;
+  --ink-secondary: #2c423f;
+  --muted: #5e7370;
+  --subtle: #586d69;
+  --line: #dfe7e5;
+  --line-strong: #c5d6d2;
+
+  /* Surfaces & Glass Backgrounds */
+  --background: #f3f7f5;
+  --background-radial: radial-gradient(circle at 10% -5%, #e0f2ed 0, transparent 34rem), #f3f7f5;
+  --surface: rgba(255, 255, 255, 0.94);
+  --surface-opaque: #ffffff;
+  --surface-subtle: #f8fbfa;
+  --surface-glass: rgba(255, 255, 255, 0.84);
+  --surface-dark: #081614;
+  --surface-dark-glass: rgba(8, 22, 20, 0.88);
+
+  /* Status Colors */
+  --success: #0f766e;
+  --success-bg: #edf8f5;
+  --success-border: #bfe5db;
+  --success-text: #0a564f;
+
+  --warning: #a15c1b;
+  --warning-bg: #fff8eb;
+  --warning-border: #f7dfaf;
+  --warning-text: #824712;
+
+  --danger: #be2e2e;
+  --danger-bg: #fff2f2;
+  --danger-border: #f9d1d1;
+  --danger-text: #962222;
+
+  --info: #0284c7;
+  --info-bg: #f0f9ff;
+  --info-border: #bae6fd;
+  --info-text: #0369a1;
+
+  /* Shadows & Elevations */
+  --shadow-xs: 0 1px 2px rgba(15, 42, 38, 0.035);
+  --shadow-sm: 0 2px 8px rgba(15, 42, 38, 0.05);
+  --shadow-soft: 0 8px 24px rgba(23, 56, 51, 0.06);
+  --shadow: 0 18px 48px rgba(20, 56, 51, 0.08);
+  --shadow-lg: 0 28px 70px rgba(16, 50, 45, 0.12);
+  --shadow-modal: 0 32px 90px rgba(6, 28, 25, 0.28);
+  --shadow-brand: 0 12px 28px rgba(20, 118, 109, 0.22);
+  --shadow-inner-light: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+
+  /* Radii */
+  --radius-xs: 6px;
+  --radius-sm: 9px;
+  --radius-md: 13px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --radius-2xl: 32px;
+  --radius-full: 9999px;
+
+  /* Animation & Transitions */
+  --ease-smooth: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-fast: 150ms;
+  --duration-normal: 220ms;
+  --duration-slow: 380ms;
+}
+
+/* Tailwind CSS v4 Theme Registration */
+@theme {
+  --color-brand-50: var(--brand-50);
+  --color-brand-100: var(--brand-100);
+  --color-brand-200: var(--brand-200);
+  --color-brand-300: var(--brand-300);
+  --color-brand-400: var(--brand-400);
+  --color-brand-500: var(--brand-500);
+  --color-brand-600: var(--brand-600);
+  --color-brand-700: var(--brand-700);
+  --color-brand-800: var(--brand-800);
+  --color-brand-900: var(--brand-900);
+  --color-brand-950: var(--brand-950);
+
+  --color-brand: var(--brand);
+  --color-brand-deep: var(--brand-deep);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-accent: var(--brand-accent);
+
+  --color-ink: var(--ink);
+  --color-ink-secondary: var(--ink-secondary);
+  --color-muted: var(--muted);
+  --color-subtle: var(--subtle);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-opaque: var(--surface-opaque);
+  --color-surface-subtle: var(--surface-subtle);
+  --color-surface-glass: var(--surface-glass);
+  --color-surface-dark: var(--surface-dark);
+
+  --color-success: var(--success);
+  --color-success-bg: var(--success-bg);
+  --color-success-border: var(--success-border);
+  --color-success-text: var(--success-text);
+
+  --color-warning: var(--warning);
+  --color-warning-bg: var(--warning-bg);
+  --color-warning-border: var(--warning-border);
+  --color-warning-text: var(--warning-text);
+
+  --color-danger: var(--danger);
+  --color-danger-bg: var(--danger-bg);
+  --color-danger-border: var(--danger-border);
+  --color-danger-text: var(--danger-text);
+
+  --font-sans: var(--font-family-base);
+  --font-mono: var(--font-family-mono);
+
+  --shadow-default: var(--shadow);
+}

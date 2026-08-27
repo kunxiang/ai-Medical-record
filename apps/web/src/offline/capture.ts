@@ -1,5 +1,3 @@
-import exifr from 'exifr';
-import { PDFDocument } from 'pdf-lib';
 import { uuidv7 } from 'uuidv7';
 import { MAX_UPLOAD_BYTES } from '@amr/contracts';
 import { db, putBlob, putCapture, type BlobRecord, type CaptureRecord } from './db.js';
@@ -27,6 +25,7 @@ async function imageSize(blob: Blob): Promise<{ width: number; height: number }>
 
 /** PDF 首页 MediaBox 取整 pt(纯解析,不渲染;与 m0-03 §2 一致) */
 async function pdfSize(blob: Blob): Promise<{ width: number; height: number }> {
+  const { PDFDocument } = await import('pdf-lib');
   const doc = await PDFDocument.load(await blob.arrayBuffer(), { updateMetadata: false });
   const page = doc.getPage(0);
   return { width: Math.max(1, Math.round(page.getWidth())), height: Math.max(1, Math.round(page.getHeight())) };
@@ -71,6 +70,15 @@ export async function preparePage(file: File): Promise<PreparedPage> {
 
   let exif: PreparedPage['exif'] = null;
   if (mime !== 'application/pdf') {
+    let exifr: (typeof import('exifr'))['default'];
+    try {
+      ({ default: exifr } = await import('exifr'));
+    } catch {
+      // 动态 chunk 未缓存时不能把「组件加载失败」降级成「图片没有 EXIF」:
+      // 否则离线导入旧单据会永久使用今天作为 capture_date。
+      throw new CaptureRejected('图片日期解析组件尚未就绪，请恢复网络后重试；本次文件尚未保存');
+    }
+
     try {
       // 纯解析,不改动源字节
       // orientation 必须走专用入口:pick 模式下 IFD0 的 Orientation 取不到

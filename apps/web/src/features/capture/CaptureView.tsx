@@ -47,17 +47,19 @@ export function CaptureView({
   async function ingest(files: FileList | null, source: 'camera' | 'album'): Promise<void> {
     if (!files?.length) return;
     setError(null);
+    let activeDraftId = draftId ?? undefined;
     try {
       for (const file of Array.from(files)) {
         const room = await ensureRoomFor(file.size);
         if (!room.ok) throw new CaptureRejected(room.reason!);
         const page = await preparePage(file);          // 校验 + 物化 Blob + 摘要 + 尺寸 + EXIF
         const rec = await appendDraftPage({
-          draftId: draftId ?? undefined,
+          draftId: activeDraftId,
           person: selected ? { id: selected.id, slug: selected.slug, display_name: selected.display_name } : null,
           page,
           source: page.mime_type === 'application/pdf' ? 'pdf' : source,
         });
+        activeDraftId = rec.client_document_id;
         setDraftId(rec.client_document_id);
         setDraftPages(rec.page_count);
       }
