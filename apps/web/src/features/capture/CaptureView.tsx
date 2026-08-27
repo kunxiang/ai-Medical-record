@@ -145,7 +145,7 @@ export function CaptureView({
             iconLeft={!uploadingAll ? <UploadCloud size={16} /> : undefined}
             className="bg-amber-600 hover:bg-amber-500 text-white font-bold px-5 py-2.5 rounded-xl shadow-md cursor-pointer shrink-0"
           >
-            ⚡ 立即上传全部 ({pending.length})
+            立即上传全部 ({pending.length})
           </Button>
         </div>
       )}

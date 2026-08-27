@@ -148,7 +148,7 @@ export function DraftGallery({
             'bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-600 text-white shadow-emerald-600/30 border-0',
           )}
         >
-          🚀 立即完成并上传 ({items.length} 页)
+          立即完成并上传 ({items.length} 页)
         </Button>
       </div>
 
@@ -166,7 +166,7 @@ export function DraftGallery({
             iconLeft={<Camera size={18} className="text-emerald-700" />}
             className="w-full justify-center text-sm sm:text-base font-bold py-3 bg-white hover:bg-emerald-50/70 text-slate-800 border-emerald-200 shadow-sm"
           >
-            📷 继续拍照加页
+            继续拍照加页
           </Button>
           <Button
             variant="secondary"
@@ -176,7 +176,7 @@ export function DraftGallery({
             iconLeft={<Images size={18} className="text-emerald-700" />}
             className="w-full justify-center text-sm sm:text-base font-bold py-3 bg-white hover:bg-emerald-50/70 text-slate-800 border-emerald-200 shadow-sm"
           >
-            🖼️ 从相册 / PDF 加选文件
+            从相册 / PDF 加选文件
           </Button>
         </div>
       </div>
