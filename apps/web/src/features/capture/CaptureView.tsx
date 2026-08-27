@@ -150,8 +150,34 @@ export function CaptureView({
         </div>
       )}
 
-      {/* Draft Page Pre-Upload Preview Gallery & Rotation */}
-      {draftId && draftPages > 0 && (
+      {/* Invisible file inputs for camera and album */}
+      <input
+        ref={cameraRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        hidden
+        onChange={(e) => {
+          void ingest(e.target.files, 'camera');
+          e.target.value = '';
+        }}
+        data-testid="input-camera"
+      />
+      <input
+        ref={albumRef}
+        type="file"
+        accept="image/*,application/pdf"
+        multiple
+        hidden
+        onChange={(e) => {
+          void ingest(e.target.files, 'album');
+          e.target.value = '';
+        }}
+        data-testid="input-album"
+      />
+
+      {/* Unified Workspace: If draft is active, render DraftGallery; otherwise render initial Capture Card */}
+      {draftId && draftPages > 0 ? (
         <DraftGallery
           draftId={draftId}
           pageCount={draftPages}
@@ -170,107 +196,75 @@ export function CaptureView({
           onAddCamera={() => cameraRef.current?.click()}
           onAddAlbum={() => albumRef.current?.click()}
         />
+      ) : (
+        <Card className="space-y-5">
+          <div className="flex items-center gap-3 pb-3 border-b border-line/60">
+            <div className="w-10 h-10 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center shrink-0">
+              <Sparkles size={20} />
+            </div>
+            <div>
+              <h2 className="text-base sm:text-lg font-bold text-ink leading-snug">
+                添加医疗文件
+              </h2>
+              <p className="text-xs text-muted leading-tight">
+                支持拍照、相册多选和 PDF，单个文件最大 50 MiB。
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <button
+              type="button"
+              onClick={() => cameraRef.current?.click()}
+              data-testid="btn-camera"
+              className={cn(
+                'group relative flex items-center justify-between p-5 rounded-2xl border text-left transition-all duration-200 cursor-pointer',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2',
+                'bg-gradient-to-br from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 active:from-emerald-700 active:to-teal-800 text-white border-emerald-600/50 shadow-brand',
+              )}
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center shrink-0 shadow-inner">
+                  <Camera size={26} />
+                </div>
+                <div className="space-y-0.5">
+                  <strong className="text-base font-bold block">拍照采集</strong>
+                  <span className="text-xs text-white/85 block">适合纸质病历与检查单</span>
+                </div>
+              </div>
+              <ArrowRight className="text-xl font-bold text-white/80 group-hover:translate-x-1 transition-transform" size={20} />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => albumRef.current?.click()}
+              data-testid="btn-album"
+              className={cn(
+                'group relative flex items-center justify-between p-5 rounded-2xl border text-left transition-all duration-200 cursor-pointer',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2',
+                'bg-white hover:bg-slate-50 active:bg-slate-100 text-ink border-line hover:border-brand-300 shadow-soft',
+              )}
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center shrink-0">
+                  <Images size={25} />
+                </div>
+                <div className="space-y-0.5">
+                  <strong className="text-base font-bold block">相册 / PDF</strong>
+                  <span className="text-xs text-muted block">支持一次选择多个文件</span>
+                </div>
+              </div>
+              <ArrowRight className="text-xl font-bold text-muted group-hover:text-brand-600 group-hover:translate-x-1 transition-all" size={20} />
+            </button>
+          </div>
+        </Card>
       )}
 
-      {/* Capture Studio */}
-      <Card className="space-y-5">
-        <div className="flex items-center gap-3 pb-3 border-b border-line/60">
-          <div className="w-10 h-10 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center shrink-0">
-            <Sparkles size={20} />
-          </div>
-          <div>
-            <h2 className="text-base sm:text-lg font-bold text-ink leading-snug">
-              {draftPages > 0 ? '继续向当前草稿添加页面' : '添加医疗文件'}
-            </h2>
-            <p className="text-xs text-muted leading-tight">
-              {draftPages > 0
-                ? `已保存 ${draftPages} 页，可继续拍摄或选择相册加页。`
-                : '支持拍照（自动纠正方向）、相册多选和 PDF，单个文件最大 50 MiB。'}
-            </p>
-          </div>
-        </div>
-
-        <input
-          ref={cameraRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          hidden
-          onChange={(e) => {
-            void ingest(e.target.files, 'camera');
-            e.target.value = '';
-          }}
-          data-testid="input-camera"
-        />
-        <input
-          ref={albumRef}
-          type="file"
-          accept="image/*,application/pdf"
-          multiple
-          hidden
-          onChange={(e) => {
-            void ingest(e.target.files, 'album');
-            e.target.value = '';
-          }}
-          data-testid="input-album"
-        />
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <button
-            type="button"
-            onClick={() => cameraRef.current?.click()}
-            data-testid="btn-camera"
-            className={cn(
-              'group relative flex items-center justify-between p-5 rounded-2xl border text-left transition-all duration-200 cursor-pointer',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2',
-              'bg-gradient-to-br from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 active:from-emerald-700 active:to-teal-800 text-white border-emerald-600/50 shadow-brand',
-            )}
-          >
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center shrink-0 shadow-inner">
-                <Camera size={26} />
-              </div>
-              <div className="space-y-0.5">
-                <strong className="text-base font-bold block">
-                  {draftPages > 0 ? '继续拍照加页' : '拍照采集'}
-                </strong>
-                <span className="text-xs text-white/85 block">
-                  {draftPages > 0 ? `已保存 ${draftPages} 页` : '支持自动正向与单页旋转'}
-                </span>
-              </div>
-            </div>
-            <ArrowRight className="text-xl font-bold text-white/80 group-hover:translate-x-1 transition-transform" size={20} />
-          </button>
-
-          <button
-            type="button"
-            onClick={() => albumRef.current?.click()}
-            data-testid="btn-album"
-            className={cn(
-              'group relative flex items-center justify-between p-5 rounded-2xl border text-left transition-all duration-200 cursor-pointer',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2',
-              'bg-white hover:bg-slate-50 active:bg-slate-100 text-ink border-line hover:border-brand-300 shadow-soft',
-            )}
-          >
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center shrink-0">
-                <Images size={25} />
-              </div>
-              <div className="space-y-0.5">
-                <strong className="text-base font-bold block">相册 / PDF</strong>
-                <span className="text-xs text-muted block">支持一次选择多个文件与预览</span>
-              </div>
-            </div>
-            <ArrowRight className="text-xl font-bold text-muted group-hover:text-brand-600 group-hover:translate-x-1 transition-all" size={20} />
-          </button>
-        </div>
-
-        {error && (
-          <Alert variant="danger" data-testid="capture-error">
-            {error}
-          </Alert>
-        )}
-      </Card>
+      {error && (
+        <Alert variant="danger" data-testid="capture-error">
+          {error}
+        </Alert>
+      )}
 
       {/* Upload Summary Bar */}
       <div
