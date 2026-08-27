@@ -117,7 +117,7 @@
 ## Milestone 5: PDF 与弱网大文件
 
 - [x] **[L] [backend] PDF Stage 1**: 正常 PDF 走 document block，超限进入 unsupported
-  - 文件: `packages/ai/src/{stage1,transport}.ts`, `packages/ai/prompts/s1/s1-classify@2.md`, `apps/api/src/{pdf-stage1.ts,jobs/stage1-handler.ts}`, `packages/ai/test/*`, `apps/api/test/stage1-pdf.test.ts`
+  - 文件: `packages/ai/src/{stage1,transport}.ts`, `packages/ai/prompts/s1/s1-classify@3.md`, `apps/api/src/{pdf-stage1.ts,jobs/stage1-handler.ts}`, `packages/ai/test/*`, `apps/api/test/stage1-pdf.test.ts`
   - Spec: `specs/m2/02-ai-client.md` §3.5；`specs/m2/03-stage1.md` §1.6；`specs/m2/99-acceptance.md` A14b/A26
   - Wiki 引用: `feature_wiki/ai-metadata-and-jobs.md`
   - verify (auto): `pnpm --filter @amr/ai test && pnpm --filter @amr/api test`
@@ -140,7 +140,7 @@
   - verify (auto): `docker exec ai-medical-record-api-1 sh -lc 'test "$AI_PROVIDER" = deepseek && test -n "$DEEPSEEK_API_KEY"'`
   - verify (manual): 2026-08-27 项目所有者明确授权生产医疗图片/PDF 发送至 DeepSeek；真实 JPEG job 到 `done`，工件 model=`deepseek-v4-flash-vision-exp`；密钥未进日志或仓库
 
-- [ ] **[L] [backend] Human-layer replay**: 回放 archive/ack/normalization，未知事件继续，零 AI 调用
+- [x] **[L] [backend] Human-layer replay**: 回放 archive/ack/normalization，未知事件继续，零 AI 调用
   - 文件: `tools/src/rebuild-index.ts`, `tools/src/verify-rebuild.ts`
   - Spec: `specs/m2/07-replay.md`；`specs/m2/99-acceptance.md` A33–A35/B13/B15
   - Wiki 引用: `agent_wiki/architecture-data-and-security.md`（PostgreSQL 可由 L1 重建）
@@ -152,7 +152,8 @@
   - Spec: `specs/m2/99-acceptance.md`
   - Wiki 引用: `feature_wiki/ai-metadata-and-jobs.md`
   - verify (auto): `pnpm m2:acceptance`
-  - verify (manual): 项目所有者提供至少 20 份脱敏真实单据并确认替换策略
+  - verify (manual, deferred): 项目所有者提供至少 20 份脱敏真实单据并确认替换策略；2026-08-27 项目所有者明确同意延期收集，不阻塞 A/B 工程验收
+  - 2026-08-27 进度:统一入口已自动化 A1–A8、A9b、A10–A12、A15–A17、A33–A35 共 18 个场景，B1–B15 按 CHANGES #14 全绿；当前 4 个模型盒均为 `provenance=synthetic`，真实 wire cassette 未录制，故第一批与 Milestone 6 均不标记验收完成。C1–C9 延后执行，不以合成数据替代真实质量结论
 
 - [ ] **[M] [docs] Close M2**: A/B 全绿、C 基线入库后更新 roadmap、wiki 和部署说明
   - 文件: `specs/m2/RESULTS.md`, `docs/09-roadmap.md`, `docs/11-deployment.md`, `agent_wiki/*`, `feature_wiki/*`
@@ -160,6 +161,7 @@
   - Wiki 引用: `agent_wiki/runtime/m2-implementation-status.md`
   - verify (auto): `rg -n "M2.*关闭|A\(42 项\).*全绿" specs/m2/RESULTS.md docs/09-roadmap.md`
   - verify (manual): 项目所有者确认 C 组基线可接受（不设准确率门槛）
+  - 2026-08-27 边界:允许在 C 组数据未到位时继续开发、测试和候选发布；M2 最终关闭仍需补录 C1–C9 基线
 
 ## Complexity Legend
 
@@ -175,3 +177,6 @@
 | 2026-08-26 | 有条件通过（Milestone 4 文档边界） | split/merge/move-page、page_move correction、严格 derived 前缀删除、幂等台账与重建回放已实现；新增规划/契约测试。`pnpm typecheck`、`pnpm test`、`pnpm build`、`git diff --check` 全绿。规格中“共用源目录且各有 capture.json”的 WORM key 冲突已按 `CHANGES #9` 修正。尚未在本机真实 S3 文档上执行会修改用户测试数据的边界操作，移页后预览人工验收仍待项目所有者使用专用测试文档完成。 |
 | 2026-08-26 | 通过（Milestone 5 PDF Stage 1） | 正常 PDF 使用单个 base64 document block；服务端以 `pdf-lib` 校验内部物理页数，32 MiB/600 页超限直接 `unsupported`，模型输出必须恰好覆盖 `1..N`，数据库不展开 PDF 页。S1 prompt 升 v2；32k 提额改为真实流式路径。AI/API 目标测试、全仓类型/测试/构建门禁通过；真实模型调用仍受部署凭证门禁约束。 |
 | 2026-08-26 | 有条件通过（Milestone 5 Multipart resume） | `>8 MiB` 不再获得单 PUT URL，固定 8 MiB 分片；create/sign/complete 经鉴权，服务端完成后 GET 回流校验整文件 SHA-256，IndexedDB 持久化 UploadId/ETag 并只重传缺失 part；补齐 complete 已成功但 DB 未落盘的恢复窗口。contracts 26/26、API 34/34、Web 3/3 目标测试及各包类型检查通过。真实 12 MiB 对象存储中断刷新冒烟与 owner 浏览器验收仍待当前工作树发布到测试部署后执行。 |
+| 2026-08-27 | 有条件通过（Milestone 6 Human-layer replay） | 完整性/正确性/一致性三维复核先发现 encounter 决策缺 facility 快照，修复后重新审查。archive/ack/facility+encounter normalization 按 `(at,event_id)` 全局回放，未知事件继续，旧 encounter 载荷进入对账；隔离 Docker 删库演练 19/19、AI transport 计数 0、二次重建逐字段一致、cassette PII 扫描 1/1、contracts 30/30、storage 12/12、AI 46/46、API 34/34、tools 5/5 与全仓 typecheck 全绿。未启用 subagent，未调用外部 advisor；MCP-LSP 未暴露，以 `rg`、目标类型定义和 TypeScript 编译兜底。M2 整体仍缺 A1–A32 统一编排和 C 组 20 份真实脱敏单据基线。 |
+| 2026-08-27 | 已撤回（Acceptance harness 第一批） | 独立审查 #005 判定 REJECT：B1/B2 与规范不一致，4 个盒为 synthetic stub 而非真实 wire 录制，A6/A15 断言不具判别性；因此原“A=18/42 集成通过”的结论无效。 |
+| 2026-08-27 | 有条件通过（Candidate harness 修复） | 见 `review-005.md`。已正式记录 DeepSeek/schema 兼容裁决，修复 B1/B2、A6/A15、invalid_output 重试、cassette provenance 和并发隔离。最新 `pnpm m2:acceptance`：脚本 24/24、contracts 37/37、storage 12/12、AI 49/49、API 37/37、tools 5/5、B/PII 门禁与全仓 typecheck 全绿；扫描明确 `recorded=0, synthetic=4`，故只通过 candidate harness，第一批正式验收仍待真实 wire cassette。 |

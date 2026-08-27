@@ -1,13 +1,13 @@
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import {
-  EncounterProposal, NormalizationConfirmRequest, NormalizationConfirmResponse,
+  EncounterDecisionPayload, EncounterProposal, NormalizationConfirmRequest, NormalizationConfirmResponse,
   NormalizationDecisionListQuery, NormalizationDecisionListResponse,
   Uuid,
 } from '@amr/contracts';
 import { serverTimestamp } from '@amr/storage';
 import { db } from '../db/client.js';
-import { document, normalizationDecision, person, personAccess } from '../db/schema.js';
+import { document, facility, normalizationDecision, person, personAccess } from '../db/schema.js';
 import { defineRoute } from '../define-route.js';
 import { ApiError, notFound } from '../errors.js';
 import { appendDecision } from '../journal.js';
@@ -146,6 +146,20 @@ export function registerNormalizationRoutes(app: FastifyInstance): void {
           }
         }
         const at = serverTimestamp();
+        let decisionPayload: Record<string, unknown> = row.proposal as Record<string, unknown>;
+        if (row.kind === 'encounter') {
+          const proposal = EncounterProposal.parse(row.proposal);
+          const facilityRow = (await tx.select().from(facility)
+            .where(eq(facility.id, proposal.facility_id)).limit(1))[0];
+          if (!facilityRow) throw new ApiError('validation_failed', '归组建议引用的机构已经不存在');
+          decisionPayload = EncounterDecisionPayload.parse({
+            ...proposal,
+            facility: {
+              id: facilityRow.id, slug: facilityRow.slug, name: facilityRow.name,
+              aliases: facilityRow.aliases, city: facilityRow.city, level: facilityRow.level,
+            },
+          });
+        }
         await appendDecision(tx, {
           schema_version: '1.0', op: 'normalization_confirm', at,
           event_id: input.client_operation_id,
@@ -154,7 +168,7 @@ export function registerNormalizationRoutes(app: FastifyInstance): void {
           kind: row.kind,
           input_fingerprint: row.inputFingerprint,
           decision: input.decision,
-          payload: row.proposal,
+          payload: decisionPayload,
         });
         return (await tx.update(normalizationDecision).set({
           state: input.decision,

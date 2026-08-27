@@ -56,12 +56,14 @@
 **目标:不用手填任何东西,系统自己知道这是谁、什么时候、哪家医院、什么单子。**
 
 - [x] 可配置视觉模型调用封装 + prompt 版本管理（DeepSeek/Anthropic）
-- [ ] Stage 1:分类 + 元数据 + **全文提取**
-- [ ] **本地归人确认 + 上传后 AI 对账告警(person_mismatch)**(ADR-041)(见 [07 · API](./07-api-contract.md#归人建议可选前置调用))
-- [ ] facility 归一(AI 判断 + normalization_decision 缓存,ADR-040)
-- [ ] encounter 自动归组建议(同人 + 同机构 + 时间窗,AI 判断,ADR-037/040)
-- [ ] 后台任务队列 + 状态查询
-- [ ] `stop_reason: refusal` 与失败降级处理
+- [x] Stage 1:分类 + 元数据 + **全文提取**
+- [x] **本地归人确认 + 上传后 AI 对账告警(person_mismatch)**(ADR-041)(见 [07 · API](./07-api-contract.md#归人建议可选前置调用))
+- [x] facility 归一(AI 判断 + normalization_decision 缓存,ADR-040)
+- [x] encounter 自动归组建议(同人 + 同机构 + 时间窗,AI 判断,ADR-037/040)
+- [x] 后台任务队列 + 状态查询
+- [x] `stop_reason: refusal` 与失败降级处理
+- [x] M2 人工层 archive/ack/normalization 删库回放
+- [ ] A(42)+B(15) 统一验收与 C 组质量基线（当前 18/42 个 A 场景已自动化、B=15/15；真实 wire cassette 尚缺，C 经 owner 确认延期，全部补齐后才关闭 M2）
 
 **验收:** 上传一叠混合单据,类型/日期/医院识别准确率可测;归人从不静默默认。
 

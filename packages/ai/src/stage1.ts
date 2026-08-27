@@ -62,21 +62,26 @@ export interface S1Result {
   promptSha256: string;
 }
 
-/** 构造请求。抽出来是为了让"图在文字之前""页号是全局的"这两条可被单测直接断言。 */
+/** 构造请求。抽出来是为了让"所有图在文字之前""页号是全局的"这两条可被单测直接断言。 */
 export function buildS1Request(pages: S1PageInput[], maxTokens: number, promptVersion?: number): BetaMessageCreateParams {
   if (pages.length === 0) throw new Error('S1 至少需要一页');
   const prompt = getPrompt(S1_PROMPT_ID, promptVersion);
 
-  const content = pages
-    .slice()
-    .sort((a, b) => a.pageNo - b.pageNo)
-    .flatMap((p) => [
-      // 页号先给出,模型直接采用(prompt 里也写了"不要自行编号")
-      { type: 'text' as const, text: `第 ${p.pageNo} 页:` },
-      // ★ 图必须在该页文字之后、下一页文字之前;整体上仍是 image-then-text 的结构
-      { type: 'image' as const, source: { type: 'url' as const, url: p.imageUrl } },
-    ]);
-  content.push({ type: 'text' as const, text: '识别这份医疗单据,按 schema 输出。' });
+  const ordered = pages.slice().sort((a, b) => a.pageNo - b.pageNo);
+  const content: Array<
+    | { type: 'image'; source: { type: 'url'; url: string } }
+    | { type: 'text'; text: string }
+  > = ordered.map((page) => ({
+    type: 'image' as const,
+    source: { type: 'url' as const, url: page.imageUrl },
+  }));
+  // 官方 image-then-text 要求所有视觉块先出现；页号映射集中放在唯一的尾部文本中。
+  // 按 page_no 排序后，映射字节稳定，也不会在分批时退化成批内编号。
+  content.push({
+    type: 'text' as const,
+    text: `以上图像按出现顺序对应全局页号：${ordered.map((page) => `第 ${page.pageNo} 页`).join('、')}。` +
+      '识别这份医疗单据，按 schema 输出。',
+  });
 
   return {
     model: MODEL,
@@ -228,6 +233,11 @@ export async function callS1(pages: S1PageInput[], promptVersion?: number): Prom
     if (e instanceof S1Error && e.failure.kind === 'max_tokens') {
       return callS1OnceWith(getStreamTransport(), pages, S1_MAX_TOKENS_RETRY, promptVersion);
     }
+    if (e instanceof S1Error && e.failure.kind === 'invalid_output') {
+      // schema 失败属于模型输出偶发偏差，不占用队列 attempt；同一次取件内同步重试一次。
+      // 第二次仍无效时把原始 S1Error 交给 handler 转 needs_human，禁止无限重试。
+      return callS1OnceWith(getTransport(), pages, S1_MAX_TOKENS, promptVersion);
+    }
     throw e;
   }
 }
@@ -238,6 +248,9 @@ export async function callS1Pdf(pdf: S1PdfInput, promptVersion?: number): Promis
   } catch (e) {
     if (e instanceof S1Error && e.failure.kind === 'max_tokens') {
       return callS1PdfOnceWith(getStreamTransport(), pdf, S1_MAX_TOKENS_RETRY, promptVersion);
+    }
+    if (e instanceof S1Error && e.failure.kind === 'invalid_output') {
+      return callS1PdfOnceWith(getTransport(), pdf, S1_MAX_TOKENS, promptVersion);
     }
     throw e;
   }

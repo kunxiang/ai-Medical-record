@@ -28,7 +28,7 @@
 | A1 | 上传一份带 `Orientation=6` 的单页文档 | `derived/{slug}/{sid}/ai-01.webp` 存在;其像素**高 > 宽**(已旋正);长边 ≤ 2576;`sharp().metadata().exif` 为空 |
 | A2 | 检查送进模型的请求 | 图像块 URL 指向 `ai-01.webp` **而非** L1 原件;image 块排在 text 块之前;**未**出现 base64 图像源 |
 | A3 | 登记后立即查 job | `ai_job` 恰 1 行,`kind='stage1'`、`state='pending'`;**同事务投递**:回滚登记事务后 job 行不存在 |
-| A4 | 跑完 S1 | job → `done`;`derived/{slug}/{sid}/extractions/s1@{v}.json` 存在;含 `model`/`prompt_id`/`prompt_version`/`prompt_sha256`/`effort`/`usage` 六项,缺一即失败 |
+| A4 | 跑完 S1 | job → `done`;`derived/{slug}/{sid}/extractions/s1-v{NNN}.json` 存在;含 `model`/`prompt_id`/`prompt_version`/`prompt_sha256`/`effort`/`usage` 六项,且 `model` 等于录制盒真实响应模型；缺一即失败 |
 | A5 | 落库 | `document.doc_type ≠ 'unknown'`;`s1_artifact_key` 非空;**`person_id` 与登记时逐字节相同**(AI 不得改归属) |
 | A6 | `full_text` 落点 | 数据库中**不存在**任何列含全文;全文只在 S1 工件内 |
 | A7 | 重复投递 | 同 `(document_id,'stage1')` 再投递 → job 仍 1 行(唯一索引生效) |
@@ -76,8 +76,8 @@
 
 | # | 断言 |
 |---|---|
-| B1 | `packages/ai` 只依赖 `@anthropic-ai/sdk` 与 `@amr/contracts`;不 import `@amr/api` / `@amr/storage` |
-| B2 | 模型 ID 只在 `packages/ai/src/models.ts` 出现一次。扫描范围**仅限** `packages/**/src`、`apps/**/src`、`tools/src`;**必须**排除 `fixtures/**`(录制盒内必然含模型名)与 `docs/**`(审核 #003 A8) |
+| B1 | `packages/ai` 运行时只依赖 `@anthropic-ai/sdk`、`@amr/contracts`、`zod`、`zod-to-json-schema`;不 import `@amr/api` / `@amr/storage`。schema 工具不得成为第二套业务 contract |
+| B2 | provider 默认模型 ID 只在 `packages/ai/src/models.ts` 出现。扫描范围**仅限** `packages/**/src`、`apps/**/src`、`tools/src`;同时扫描 `claude-*` 与 `deepseek-v*`;**必须**排除 `fixtures/**` 与 `docs/**`(审核 #003 A8 / CHANGES #14) |
 | B3 | **缓存的可控前提**(离线可测):连续两次调用的 **system 块序列化字节逐字节相同**,且 `cache_control` 只出现在 system 上。<br>原版"第二次 `cache_read_input_tokens > 0"` 在强制回放下**要么恒真要么恒假**:两次请求指纹相同 ⇒ 命中同一个盒子 ⇒ 读到的是第一次(未命中)的 usage ⇒ 恒假;若为此录成两个盒子,断言的就是"我录了一个 `cache_read>0` 的 JSON 文件" ⇒ 恒真。真实命中率移入 C9(审核 #004 A-11) |
 | B4 | **prompt 完整性**:篡改任一 prompt 文件而不改 `manifest.json` → 启动失败 |
 | B5 | 新增 7 个 journal 事件在 `_meta/schemas`、`_meta/registries`、`_meta/README.md` 三处齐备 |

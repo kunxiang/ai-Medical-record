@@ -1,7 +1,7 @@
 version: 1
 task: m2-ai-metadata-and-reconciliation
-generated_on: "2026-08-26"
-source_commit: "338a4e729f5ae3c22f6505e4caa54eca99c31b66"
+generated_on: "2026-08-27"
+source_commit: "29f2fe84daf4c9b9e2db01ff054ae0fcb672e970"
 task_document: specs/m2/tasks.md
 required_skill_route: fullstack
 
@@ -32,6 +32,9 @@ expanded_paths:
   - specs/m2/05-reconciliation.md
   - specs/m2/99-acceptance.md
   - specs/m2/CHANGES.md
+  - specs/m2/ACCEPTANCE-COVERAGE.md
+  - specs/m2/RESULTS.md
+  - specs/m2/review-005.md
   - specs/m2/tasks.md
   - apps/web/src/App.tsx
   - apps/web/src/features/capture/CaptureView.tsx
@@ -66,8 +69,14 @@ expanded_paths:
   - packages/contracts/src/multipart.ts
   - packages/contracts/src/sidecars.ts
   - tools/src/rebuild-index.ts
+  - tools/src/human-replay.ts
+  - tools/src/verify-rebuild.ts
+  - tools/src/m2-acceptance.ts
+  - tools/src/scan-m2-pii.ts
+  - infra/run-m2.sh
   - packages/ai/src/stage1.ts
   - packages/ai/src/transport.ts
+  - packages/ai/src/cassette.ts
   - packages/ai/src/deepseek-transport.ts
   - packages/ai/src/models.ts
   - packages/ai/src/facility.ts
@@ -82,8 +91,8 @@ deferred_paths:
     reason: "初始化页只需要当前 Stage 1 代码与 M2 spec；未来写 AI 设计专题时展开。"
   - path: docs/08-medical-reference.md
     reason: "医学参考层尚未实现，不应进入 shipped feature wiki。"
-  - path: fixtures
-    reason: "本次不建立提取质量专题，也不复制测试数据。"
+  - path: fixtures/m2/regression
+    reason: "项目所有者于 2026-08-27 确认延期收集至少 20 份脱敏真实单据；不阻塞 A/B 工程推进，仍是 M2 最终关闭门槛，且不得用合成盒伪造 C 组基线。"
 
 negative_searches:
   - query: "backend/app/apps/**/.tasks/**/CLAUDE.md"
@@ -112,10 +121,10 @@ selected_findings:
   - id: active-m2-status
     relevance: "避免把 rollout 中能力误写成 shipped，并提供恢复锚点。"
     source_hashes:
-      docs/11-deployment.md: "447af193e48c049d76054f63fa0f392f892a086942f3d0c1dab89a8eaee6cf06"
+      docs/11-deployment.md: "b39450d4aef948e672cb361346172695ff50e70015b96898628167285a04cf44"
       specs/m2/00-scope.md: "98a8bde4ab70f0f291121aff187389690a0bf22a921f87b98f6a62ca92b73d61"
       specs/m2/05-reconciliation.md: "4567a29d307108c5c5c514f025fba5c6e2f537be464a2b02e3f52f9df5bf9780"
-      specs/m2/99-acceptance.md: "14c153935fe1cfd3a615d2b7fa9b4ba9c20218577262ec6b29abbdf90f548c23"
+      specs/m2/99-acceptance.md: "11dc8e59bbc68e45e208a772d74398a730ad1d98c3ed0f4d43bc8c19782fe5ee"
       apps/api/src/jobs/worker.ts: "1f35a71a55e8acb0f1420c9ca704ee172eb4269e5d9af490214925ed64d4c415"
       apps/api/src/jobs/stage1-handler.ts: "b8e5facda46da55489b73cb76db7ebf88bd5fe1f08d7a588d897b05d48604d8b"
       apps/api/src/routes/ai.ts: "6cd063a7288ce782f1e20743d855b1b9b98615adeb503103ee0d8746f4b63c46"
@@ -142,6 +151,27 @@ selected_findings:
     relevance: "Stage 1 必须同时处理图片/PDF 并返回可本地强校验的结构化输出。"
     decision: "deepseek-v4-flash-vision-exp 图片/文本走 Responses API json_schema；PDF 走 Anthropic document 兼容层、显式附加 schema 约束并由 Zod 终校验。"
     evidence: "2026-08-26 账户 /models 包含该模型；非敏感 PNG、医疗图片夹具、PDF 夹具及 Stage1Out schema 均完成供应商探针。"
+  - id: m2-human-layer-replay
+    relevance: "M2 新增 archive/ack/facility+encounter 人工事实，删库恢复时不得丢失或触发 AI。"
+    decision: "journal/decisions 按 (at,event_id) 全局回放；encounter 确认额外封存 facility 快照；旧载荷缺快照则对账而不猜测。"
+    evidence: "2026-08-27 隔离 Docker 删库恢复：两次重建逐字段一致、rebuild 期间 AI transport 新增调用为 0、L1 行数不增长。"
+  - id: m2-acceptance-first-batch
+    relevance: "为剩余 A 组提供逐项、不可虚报的统一验收账本。"
+    decision: "固定 p23456/d23456-d23458 合成标识用于 candidate harness；cassette 必须标注 recorded/synthetic，只有真实 wire response 才能支撑第一批正式验收；C 组仍只接受真实脱敏数据。"
+    evidence: "2026-08-27 独立 review-005 撤回原验收声明。修复后 pnpm m2:acceptance 通过：18/42 个 A 场景自动化，B 组 15/15，脚本 24/24，AI 49/49，PII 4/4；provenance recorded=0/synthetic=4。"
+    source_hashes:
+      specs/m2/02-ai-client.md: "fcabd1028c5f22cdca004b2f2c5042c77141f1d81a69caf278eb244e6d7a8299"
+      specs/m2/99-acceptance.md: "11dc8e59bbc68e45e208a772d74398a730ad1d98c3ed0f4d43bc8c19782fe5ee"
+      specs/m2/ACCEPTANCE-COVERAGE.md: "c00d79058223aea82a1e256f24d1542241931682dde19c17703382350b782320"
+      specs/m2/RESULTS.md: "8f897a05bf7430c39d49cb22222b4e834f7895934f411b061974725ba96cb519"
+      specs/m2/review-005.md: "704bffa46f18dc8e55761bbd0af8f30ce97fad569332ce520fe4cac37909c2ff"
+      packages/ai/src/stage1.ts: "fb80b9de8cb2f5c880f135a860ffa63d4c4b78dd66f31ee7c40b0db1c76224b6"
+      packages/ai/src/cassette.ts: "0184178ef2369703832a39124788fc4d7f40467f75ece4821e601ac6bfd5d095"
+      packages/ai/src/models.ts: "649b45de5d8ff49fe7be5ccc5d6bc766fa449b2a255656f30a784e555211500e"
+      apps/api/src/m2-stage1-acceptance.ts: "8d04c35f13bb12008133250ea29fd12fb413e9e2ff51c134456918eb8bac4c15"
+      tools/src/m2-acceptance.ts: "5b2cd09b74a37f7f43b12cd7309021d7b8ec0fd741e56995b47e6da12fc953e0"
+      tools/src/ci-deps.ts: "8094607d4a3fe39ef8a92f0c9e3418a76f5b09e1431c2a2194fe3652af8ffc70"
+      infra/run-m2.sh: "82147e2e9c50a7adf161605abb6e61771e284acb1135ec604f6d5b1e8abfb51a"
 
 external_sources:
   - url: "https://api-docs.deepseek.com/quick_start/pricing/"
@@ -171,6 +201,7 @@ implementation_candidates:
     - packages/contracts/src/multipart.ts
     - packages/ai/src/stage1.ts
     - packages/ai/src/transport.ts
+    - packages/ai/src/cassette.ts
     - packages/ai/prompts/
   frontend:
     - apps/web/src/api/client.ts
@@ -181,12 +212,22 @@ implementation_candidates:
     - apps/web/src/styles.css
   recovery_and_acceptance:
     - tools/src/rebuild-index.ts
+    - tools/src/human-replay.ts
     - tools/src/verify-rebuild.ts
+    - tools/src/m2-acceptance.ts
+    - tools/src/scan-m2-pii.ts
     - infra/run-m2.sh
     - specs/m2/RESULTS.md
 
-blocking_unknowns:
-  - "The M2 regression corpus of at least 20 de-identified real documents has not been provided."
+blocking_unknowns: []
+
+deferred_inputs:
+  - input: "At least 20 owner-approved de-identified real medical documents for M2 C1-C9."
+    status: deferred_by_owner_2026-08-27
+    impact: "Does not block A/B engineering or candidate release; still blocks final M2 closure."
+  - input: "At least one real provider wire cassette recorded from a synthetic, non-PII image."
+    status: pending_runtime_recording
+    impact: "Does not require the 20 real documents and does not block further engineering; blocks formal acceptance of the first model-dependent A batch."
 
 invalidations:
   - finding: "root README says project has not started coding"

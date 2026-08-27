@@ -22,5 +22,11 @@
     "version": 2,
     "file": "s1/s1-classify@2.md",
     "sha256": "bfc1c40643aa7b76538567ae7c0a7ce10c1b80e9c99f8bb582c9b159989307dd"
+  },
+  {
+    "id": "s1-classify",
+    "version": 3,
+    "file": "s1/s1-classify@3.md",
+    "sha256": "11b852c39456b47451bab1deeca2e204488b85244200e728ac3a60d0616373b9"
   }
 ]

@@ -32,10 +32,9 @@ export class PromptIntegrityError extends Error {}
 
 let cache: Map<string, LoadedPrompt> | null = null;
 
-/** 载入并校验全部 prompt。任何一项 sha256 不符 ⇒ **抛错,不降级**。 */
-export function loadPrompts(): Map<string, LoadedPrompt> {
-  if (cache) return cache;
-  const manifestPath = path.join(PROMPTS_DIR, 'manifest.json');
+/** 从指定目录载入并校验全部 prompt。导出仅用于在临时副本上做故障注入。 */
+export function loadPromptsFromDirectory(promptsDir: string): Map<string, LoadedPrompt> {
+  const manifestPath = path.join(promptsDir, 'manifest.json');
   let entries: ManifestEntry[];
   try {
     entries = JSON.parse(readFileSync(manifestPath, 'utf-8')) as ManifestEntry[];
@@ -45,7 +44,7 @@ export function loadPrompts(): Map<string, LoadedPrompt> {
 
   const out = new Map<string, LoadedPrompt>();
   for (const e of entries) {
-    const abs = path.join(PROMPTS_DIR, e.file);
+    const abs = path.join(promptsDir, e.file);
     let text: string;
     try {
       text = readFileSync(abs, 'utf-8');
@@ -61,8 +60,13 @@ export function loadPrompts(): Map<string, LoadedPrompt> {
     }
     out.set(key(e.id, e.version), { id: e.id, version: e.version, sha256: e.sha256, text });
   }
-  cache = out;
   return out;
+}
+
+/** 载入并校验生产 prompt。任何一项 sha256 不符 ⇒ **抛错,不降级**。 */
+export function loadPrompts(): Map<string, LoadedPrompt> {
+  cache ??= loadPromptsFromDirectory(PROMPTS_DIR);
+  return cache;
 }
 
 const key = (id: string, version: number) => `${id}@${version}`;

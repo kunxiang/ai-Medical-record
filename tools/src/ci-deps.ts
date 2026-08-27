@@ -41,7 +41,7 @@ if (existsSync(webPkgPath)) {
   if (webImports.length) failures.push(`apps/web 直接 import 服务端包:\n${webImports.join('\n')}`);
 }
 
-// m2-99 B1: packages/ai 只依赖 @anthropic-ai/sdk 与 @amr/contracts
+// m2-99 B1:AI 包只允许协议/SDK/schema 编译依赖，禁止穿透到 API/storage。
 const aiPkgPath = path.join(root, 'packages/ai/package.json');
 if (existsSync(aiPkgPath)) {
   const aiDeps = Object.keys((JSON.parse(readFileSync(aiPkgPath, 'utf-8')).dependencies ?? {}) as Record<string, string>);
@@ -52,17 +52,41 @@ if (existsSync(aiPkgPath)) {
   if (aiImports.length) failures.push(`m2 B1: packages/ai 直接 import 服务端包:\n${aiImports.join('\n')}`);
 }
 
-// m2-99 B2: 模型 ID 只在 packages/ai/src/models.ts 出现。
+// m2-99 B2: provider 默认模型 ID 只在 packages/ai/src/models.ts 出现。
 // 扫描范围排除 fixtures(录制盒内必然含模型名)与 docs(审核 #003 A8)。
 {
-  const srcDirs = ['packages', 'apps', 'tools/src']
+  const srcDirs = [
+    ...readdirSync(path.join(root, 'packages'), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(root, 'packages', entry.name, 'src')),
+    ...readdirSync(path.join(root, 'apps'), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(root, 'apps', entry.name, 'src')),
+    path.join(root, 'tools/src'),
+  ].filter((d) => existsSync(d));
+  const hits = srcDirs
+    .flatMap((d) => grep("['\"](claude-[a-z0-9.-]+|deepseek-v[a-z0-9.-]+)['\"]", d))
+    .filter((l) => !l.includes('packages/ai/src/models.ts'));
+  if (hits.length) failures.push(`m2 B2: provider 默认模型 ID 只允许出现在 packages/ai/src/models.ts:\n${hits.join('\n')}`);
+}
+
+// m2-99 B10:M2 只做文档级抄写与归档，禁止提前写 observation 或引入单位换算。
+{
+  const sourceDirs = ['packages', 'apps', 'tools/src']
     .map((d) => path.join(root, d))
     .filter((d) => existsSync(d));
-  const hits = srcDirs
-    .flatMap((d) => grep("['\"]claude-[a-z0-9-]+['\"]", d))
-    .filter((l) => !l.includes('/node_modules/') && !l.includes('/dist/') && !l.includes('/fixtures/'))
-    .filter((l) => !l.includes('packages/ai/src/models.ts'));
-  if (hits.length) failures.push(`m2 B2: 模型 ID 只允许出现在 packages/ai/src/models.ts:\n${hits.join('\n')}`);
+  const observationWrites = sourceDirs.flatMap((d) =>
+    grep('\\.(insert|update|delete)\\(observation\\)', d))
+    .filter((line) => !line.includes('/tools/src/ci-deps.ts:'));
+  const unitConversions = sourceDirs.flatMap((d) =>
+    grep('convert(Unit|Measurement)|normalizeUnit|toCanonicalUnit|单位换算', d))
+    .filter((line) => !line.includes('/tools/src/ci-deps.ts:'));
+  if (observationWrites.length) {
+    failures.push(`m2 B10:发现 observation 表写入:\n${observationWrites.join('\n')}`);
+  }
+  if (unitConversions.length) {
+    failures.push(`m2 B10:发现单位换算调用:\n${unitConversions.join('\n')}`);
+  }
 }
 
 // B7: 全部路由经 defineRoute —— 禁止裸注册
@@ -204,4 +228,4 @@ if (failures.length) {
   console.error('ci:deps 失败:\n' + failures.map((f) => '— ' + f).join('\n'));
   process.exit(1);
 }
-console.log('ci:deps 通过(m0-99 B1/B2/B7/B8 · m1-99 B1/B5/B6/B7/B8/B12 · m2-99 B1/B2)');
+console.log('ci:deps 通过(m0-99 B1/B2/B7/B8 · m1-99 B1/B5/B6/B7/B8/B12 · m2-99 B1/B2/B10)');

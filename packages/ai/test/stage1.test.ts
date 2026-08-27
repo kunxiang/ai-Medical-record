@@ -35,9 +35,9 @@ describe('buildS1Request(m2-02 §2/§3)', () => {
   const req = buildS1Request(P, 16000);
   const content = (req.messages[0]!.content as Array<{ type: string; text?: string; source?: { url?: string } }>);
 
-  it('每页图前是全局页号,不是批内序号(审核 #003 A7)', () => {
-    expect(content[0]).toMatchObject({ type: 'text', text: '第 21 页:' });
-    expect(content[2]).toMatchObject({ type: 'text', text: '第 22 页:' });
+  it('A2 所有图像块都排在唯一文本块之前，文本使用全局页号', () => {
+    expect(content.map((block) => block.type)).toEqual(['image', 'image', 'text']);
+    expect(content[2]?.text).toContain('第 21 页、第 22 页');
   });
 
   it('图像块引用 ai 派生物,不是 L1 原件(ADR-050)', () => {
@@ -49,7 +49,9 @@ describe('buildS1Request(m2-02 §2/§3)', () => {
 
   it('cache_control 只在 system 上,且 system 内容不含易变量', () => {
     const sys = req.system as Array<{ text: string; cache_control?: unknown }>;
+    const repeated = buildS1Request(P, 16000).system;
     expect(sys).toHaveLength(1);
+    expect(JSON.stringify(repeated)).toBe(JSON.stringify(req.system));
     expect(sys[0]!.cache_control).toEqual({ type: 'ephemeral' });
     expect(sys[0]!.text).not.toMatch(/第 2[12] 页|https:\/\//);   // 页号与 URL 必须在 messages 里
     expect(content.some((c) => (c as { cache_control?: unknown }).cache_control)).toBe(false);
@@ -64,8 +66,10 @@ describe('buildS1Request(m2-02 §2/§3)', () => {
 
   it('页序乱给也按 page_no 升序排列', () => {
     const r = buildS1Request([P[1]!, P[0]!], 16000);
-    const c = r.messages[0]!.content as Array<{ text?: string }>;
-    expect(c[0]!.text).toBe('第 21 页:');
+    const c = r.messages[0]!.content as Array<{ type: string; text?: string; source?: { url?: string } }>;
+    expect(c[0]!.source?.url).toContain('ai-21.webp');
+    expect(c[1]!.source?.url).toContain('ai-22.webp');
+    expect(c[2]!.text).toContain('第 21 页、第 22 页');
   });
 });
 
@@ -77,7 +81,7 @@ describe('callS1 的失败处置(m2-02 §5)', () => {
     const r = await callS1Once(P);
     expect(r.model).toBe('some-fallback-model');
     expect(r.usage.cache_read_input_tokens).toBe(900);
-    expect(r.promptVersion).toBe(2);
+    expect(r.promptVersion).toBe(3);
   });
 
   it('refusal ⇒ 终态,记录 category,且**不重试**', async () => {
@@ -117,9 +121,37 @@ describe('callS1 的失败处置(m2-02 §5)', () => {
     await callS1Once(P).catch((e: S1Error) => expect(e.failure.kind).toBe('invalid_output'));
   });
 
+  it('输出首次不合 schema ⇒ 同一次取件内重试一次并成功', async () => {
+    const transport = vi.fn()
+      .mockResolvedValueOnce(reply({ content: [{ type: 'text', text: '{"doc_type":"不存在的类型"}' }] }))
+      .mockResolvedValueOnce(reply());
+    setTransport(transport);
+    await expect(callS1(P)).resolves.toMatchObject({ output: { doc_type: 'lab_report' } });
+    expect(transport).toHaveBeenCalledTimes(2);
+  });
+
+  it('输出连续两次不合 schema ⇒ 抛出且不无限重试', async () => {
+    const transport = vi.fn(async () => reply({
+      content: [{ type: 'text', text: '{"doc_type":"不存在的类型"}' }],
+    }));
+    setTransport(transport);
+    await expect(callS1(P)).rejects.toMatchObject({ failure: { kind: 'invalid_output' } });
+    expect(transport).toHaveBeenCalledTimes(2);
+  });
+
   it('未知键也被拒(strict)', async () => {
     setTransport(async () => reply({
       content: [{ type: 'text', text: JSON.stringify({ ...OUT, 未知字段: 1 }) }],
+    }));
+    await expect(callS1Once(P)).rejects.toThrow(S1Error);
+  });
+
+  it('嵌套结构的未知键同样被拒(strict)', async () => {
+    setTransport(async () => reply({
+      content: [{ type: 'text', text: JSON.stringify({
+        ...OUT,
+        pages: [{ ...OUT.pages[0], unknown_page_field: true }],
+      }) }],
     }));
     await expect(callS1Once(P)).rejects.toThrow(S1Error);
   });

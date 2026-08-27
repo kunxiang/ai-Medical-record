@@ -13,7 +13,8 @@
     "db:migrate": "pnpm --filter @amr/api run db:migrate",
     "m0:acceptance": "bash infra/run-m0.sh",
     "ci:deps": "pnpm --filter @amr/tools run ci:deps",
-    "m1:acceptance": "bash infra/run-m1.sh"
+    "m1:acceptance": "bash infra/run-m1.sh",
+    "m2:acceptance": "bash infra/run-m2.sh"
   },
   "devDependencies": {
     "typescript": "^5.7.3",

@@ -149,6 +149,19 @@ export const EncounterProposal = z.object({
   reason: z.string().min(1).max(500),
 }).strict();
 
+/** decisions/L1 专用载荷：encounter 本身引用 facility UUID，因此只保存 proposal
+ * 无法在删库后恢复外键。确认时把当时机构行的完整快照一并封存。 */
+export const EncounterDecisionPayload = EncounterProposal.extend({
+  facility: z.object({
+    id: Uuid,
+    slug: z.string().regex(/^f[23456789abcdefghjkmnpqrstvwxyz]{5}$/),
+    name: z.string().min(1),
+    aliases: z.array(z.string()),
+    city: z.string().nullable(),
+    level: z.string().nullable(),
+  }).strict(),
+}).strict();
+
 export type NormalizationDecisionT = z.infer<typeof NormalizationDecision>;
 export type FacilityProposalT = z.infer<typeof FacilityProposal>;
 export type FacilityNormalizationModelOutT = z.infer<typeof FacilityNormalizationModelOut>;
@@ -156,3 +169,4 @@ export type EncounterCandidateDocumentT = z.infer<typeof EncounterCandidateDocum
 export type EncounterCandidatePairT = z.infer<typeof EncounterCandidatePair>;
 export type EncounterSuggestionModelOutT = z.infer<typeof EncounterSuggestionModelOut>;
 export type EncounterProposalT = z.infer<typeof EncounterProposal>;
+export type EncounterDecisionPayloadT = z.infer<typeof EncounterDecisionPayload>;

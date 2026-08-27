@@ -16,5 +16,7 @@
 | 10 | 2026-08-26 | S1 prompt 升至 v2，明确区分图像的显式页号与 PDF 内部物理页序；API 复用既有 `pdf-lib` 做 32 MiB / 600 页服务端门禁 | 原 v1 prompt 只描述图像并要求“页号已经给出”，与 PDF document block 没有外部页号的输入形态冲突；仅改请求 user text 无法覆盖 system 中的旧硬性要求 |
 | 11 | 2026-08-26 | 16k `max_tokens` 截断后的 32k 提额调用改走 SDK `messages.stream().finalMessage()`，录制/回放 transport 同时覆盖流式路径 | 落实审核 #004 A-8；显式 600 秒 timeout 会关闭 SDK 的非流式长请求守卫，32k 非流式调用预期超时且会产生重复计费 |
 | 12 | 2026-08-26 | `POST /uploads/presign` 对 `>8 MiB` 文件只返回 `mode='multipart'` 与空 URL；新增 `multipart_upload` L2 台账和 `upload_file.multipart_verified_at`，只有 complete 后 GET 回流整文件校验通过才允许登记 | 若仍下发单 PUT URL，客户端或旧版本可绕过强制 multipart；若仅依赖 S3 multipart ETag/复合 checksum，无法证明合并对象与客户端申报的原始 SHA-256 一致。持久化校验锚点同时让登记重试不必再次下载临时对象 |
+| 13 | 2026-08-27 | S1 图像请求改为“全部 image blocks → 单一页号映射 text block”，prompt 升至 v3；cassette 页序解析支持同一文本中的多个全局页号 | A2 与 `02-ai-client.md` 明确要求 image-then-text，原实现却交错为“页号 text → image”，且注释/测试错误地把它当成合规。集中尾部映射同时保留全局页号和稳定请求指纹 |
+| 14 | 2026-08-27 | AI 客户端规范同步项目所有者已确认并已上线验证的 DeepSeek 视觉 provider；默认模型仍由 `models.ts` 单一管理，允许同 provider 的 `AI_MODEL` 部署覆盖；`packages/ai` 允许 Zod 3 JSON Schema 编译依赖，并继续用 contracts Zod 终校验 | 项目所有者已指定 `deepseek-v4-flash-vision-exp` 并授权生产医疗图片/PDF发送至 DeepSeek。SDK 0.120.0 的 `betaZodOutputFormat` 只接受 Zod 4，而仓库 contracts 为 Zod 3，直接调用已实测报错；升级全仓 Zod 的影响远大于在 AI 边界做等价 JSON Schema 编译 |
 
 > ⚠️ 审核 #003 **不满足** docs/10 §1 的"≥2 个独立对抗视角" —— 本会话配置禁止在未获用户请求时启用子代理,故由 spec 作者本人以两个对抗视角复核。作者复核能抓内部矛盾与事实错误(A1–A5 皆属此类),但对"没想到的角度"天然失效。**建议实现开工前补一轮真正独立的审核。**

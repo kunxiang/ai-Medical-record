@@ -19,8 +19,30 @@ async function snapshot() {
     from person_identifier order by id`;
   const documents = await sql`
     select id, short_id, person_id, capture_date::text, captured_at, source,
-           original_filename, status, client_document_id
+           original_filename, status, client_document_id, encounter_id,
+           archived_at, person_check_ack_at
     from document order by short_id`;
+  // M2 只自动产生建议；每一行 encounter 都来自人工确认，因此 id 的存在与
+  // grouping_basis 都属于不可重算事实。其他列没有在 m2-01 §5 标为 L1。
+  const encounters = await sql`
+    select id, person_id, encounter_type, facility_id, department, occurred_on::text,
+           occurred_at, grouping_basis
+    from encounter order by id`;
+  // facility 表里 proposed-only 的行可由 L2 重算。这里只对账至少被一条
+  // confirmed decision 引用的家庭词表项。
+  const facilities = await sql`
+    select f.slug, f.name, f.aliases, f.city, f.level
+    from facility f
+    where exists (
+      select 1 from normalization_decision nd
+      where nd.kind = 'facility' and nd.state = 'confirmed'
+        and nd.proposal -> 'facility' ->> 'slug' = f.slug
+    )
+    order by f.slug`;
+  const decisions = await sql`
+    select kind, input_fingerprint, proposal, state, decided_by, decided_at, client_operation_id
+    from normalization_decision where state <> 'proposed'
+    order by input_fingerprint`;
   // thumb_key 不在字段表(m1-99 A19):它是 L2 派生物的位置,M1 根本不写它,
   // 比对一个恒为 null 的列只会制造"看起来通过了"的噪声。
   const pages = await sql`
@@ -30,7 +52,26 @@ async function snapshot() {
   return {
     people: people.map((r) => ({ ...r })),
     identifiers: identifiers.map((r) => ({ ...r })),
-    documents: documents.map((r) => ({ ...r, captured_at: (r['captured_at'] as Date).toISOString() })),
+    documents: documents.map((r) => ({
+      ...r,
+      captured_at: (r['captured_at'] as Date).toISOString(),
+      archived_at: r['archived_at'] instanceof Date ? r['archived_at'].toISOString() : null,
+      person_check_ack_at: r['person_check_ack_at'] instanceof Date
+        ? r['person_check_ack_at'].toISOString()
+        : null,
+    })),
+    encounters: encounters.map((r) => ({
+      ...r,
+      occurred_at: r['occurred_at'] instanceof Date ? r['occurred_at'].toISOString() : null,
+    })),
+    facilities: facilities.map((r) => ({
+      ...r,
+      aliases: [...r['aliases'] as string[]].sort(),
+    })),
+    decisions: decisions.map((r) => ({
+      ...r,
+      decided_at: r['decided_at'] instanceof Date ? r['decided_at'].toISOString() : null,
+    })),
     pages: pages.map((r) => ({ ...r })),
   };
 }
@@ -45,7 +86,9 @@ if (mode === '--dump') {
 } else if (mode === '--compare') {
   const before = JSON.parse(readFileSync(file, 'utf-8')) as typeof snap;
   const diffs: string[] = [];
-  for (const table of ['people', 'identifiers', 'documents', 'pages'] as const) {
+  for (const table of [
+    'people', 'identifiers', 'documents', 'encounters', 'facilities', 'decisions', 'pages',
+  ] as const) {
     const a = JSON.stringify(before[table]);
     const b = JSON.stringify(snap[table]);
     if (a !== b) {

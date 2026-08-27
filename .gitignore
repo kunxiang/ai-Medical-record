@@ -16,3 +16,5 @@ infra/r2.env
 
 # 测试固件的还原文件不得入库(见 packages/ai/test/prompts.test.ts 的说明)
 *.md.bak
+
+.omc/

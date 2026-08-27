@@ -1,12 +1,12 @@
-# M2 Spec · 02 Claude 调用封装与 prompt 版本管理
+# M2 Spec · 02 AI 调用封装与 prompt 版本管理
 
-包:`packages/ai`(新)。依赖 `@anthropic-ai/sdk` 与 `@amr/contracts`;**禁止**依赖 `@amr/api`、`@amr/storage`(CI 断言 B1)。
+包:`packages/ai`(新)。运行时依赖只允许 `@anthropic-ai/sdk`、`@amr/contracts` 及 schema 编译所需的 `zod` / `zod-to-json-schema`;**禁止**依赖 `@amr/api`、`@amr/storage`(CI 断言 B1)。后两者只把 contracts 的 Zod 3 schema 转为供应商接受的 JSON Schema；业务输出仍必须由 contracts schema 终校验([CHANGES](./CHANGES.md) #14)。
 
 ## 1. 客户端构造
 
-- **必须**使用官方 SDK `@anthropic-ai/sdk`,**禁止**手写 HTTP 调用。
-- 模型 **必须** 为字符串常量 `claude-opus-5`,定义于 `packages/ai/src/models.ts` 单一出处。**禁止**在调用点内联模型名,**禁止**追加日期后缀。
-- 凭证 **必须** 由 SDK 从环境解析(零参构造 `new Anthropic()`);**禁止**在代码中硬编码 key,**禁止**把 key 写进任何落桶对象。
+- Anthropic 路径**必须**使用官方 SDK `@anthropic-ai/sdk`;DeepSeek 视觉路径使用其 Responses API 兼容适配器。两条路径都必须经过同一 `Transport` 注入边界，**禁止**在业务 handler 内直接发模型 HTTP。
+- provider 默认模型必须定义于 `packages/ai/src/models.ts` 单一出处：Anthropic 为 `claude-opus-5`，DeepSeek 为项目所有者指定的 `deepseek-v4-flash-vision-exp`。部署可用 `AI_MODEL` 钉住同 provider 的实验版本；调用点**禁止**内联模型名。
+- 凭证**必须**从环境解析；**禁止**在代码中硬编码 key，**禁止**把 key 写进日志、工件或任何落桶对象。Anthropic 使用 SDK 环境解析；DeepSeek 适配器只在发请求时读取 `DEEPSEEK_API_KEY`。
 - 客户端超时 **必须** 显式设为 600000(TypeScript SDK 单位为**毫秒**);重试次数保持 SDK 默认 2。
   > ⚠️ **显式 timeout 会关闭 SDK 的非流式长请求守卫**(审核 #004 A-8)。SDK 在**没有**显式 timeout 时会按
   > `expectedTime = 3_600_000 × max_tokens / 128_000` 估算,超过 600 秒即抛错要求改用流式(阈值约 `max_tokens > 21333`)。
@@ -19,10 +19,10 @@
 // ★ 必须走 beta 命名空间:fallbacks 只在 client.beta.messages.create 上可用,
 //   而 client.messages.parse() 位于非 beta 命名空间且不接受 betas —— 二者不能混用(审核 #003 A1)。
 const res = await client.beta.messages.create({
-  model: MODEL,                    // 'claude-opus-5'
+  model: MODEL,                    // models.ts 的 provider-aware 单一出处
   max_tokens: 16000,
   output_config: {
-    format: betaZodOutputFormat(Stage1Out),   // beta 命名空间的助手名带 beta 前缀
+    format: s1OutputFormat(),       // Zod 3 → JSON Schema，调用后仍用 Stage1Out.parse
     effort: 'medium',
   },
   system: [{ type: 'text', text: prompt.text, cache_control: { type: 'ephemeral' } }],
@@ -36,7 +36,7 @@ const parsed = Stage1Out.parse(JSON.parse(textOf(res.content)));
 
 规范性条文:
 
-1. **必须**用 `client.beta.messages.create()` 配合 `output_config.format`(值由 **`betaZodOutputFormat`**(`@anthropic-ai/sdk/helpers/beta/zod`)生成 —— beta 命名空间的助手名带 `beta` 前缀)。**禁止**使用已废弃的顶层 `output_format` 参数。返回内容**必须**再经 `Stage1Out.parse()` 校验;校验失败按 §5.4 处理。
+1. canonical request **必须**使用 `output_config.format`，**禁止**使用已废弃的顶层 `output_format` 参数。由于仓库 contracts 仍是 Zod 3、SDK `betaZodOutputFormat` 只接受 Zod 4，格式由 `zod-to-json-schema` 在 `packages/ai` 内生成；Anthropic 适配为 `client.beta.messages.create()`，DeepSeek 适配为 Responses `text.format`。返回内容**必须**再经 `Stage1Out.parse()` 校验；校验失败按 §5.4 处理。
 
    > **为什么不用 `client.beta.messages.parse()`** —— 它确实存在,也确实能与 `betas`/`fallbacks` 共存(实现期核实,修正了审核 #003 A1 中"非 beta 命名空间"的表述):因为**注入点必须落在 wire 边界上**([99](./99-acceptance.md) §0)。`parse()` 在 SDK 内部做了一层客户端解析,把注入点放在它之上,录制盒里存的就不再是 API 的原始响应,而是 SDK 加工过的产物 —— 那样的回放证明不了"我们对真实响应的处理是对的"。用 `create()` + 自行 `Stage1Out.parse()`,录制盒 = 原始响应,回放才是诚实的。
    > 代价是放弃 `parsed_output` 的类型便利。这个代价换的是验收资产的可信度,值。
@@ -53,7 +53,7 @@ const parsed = Stage1Out.parse(JSON.parse(textOf(res.content)));
 3. **图像块必须排在文本块之前**(官方指引:image-then-text 效果最好)。
 4. 多页文档一次调用送多页时:
    - **必须**按 `page_no` 升序送(ADR-047:`page_no` 是语义页序;M2 仍等于 `capture_order`,不得依赖这个巧合)。
-   - 每张图前**必须**插入一个文本块 `第 N 页:`,其中 **N 必须是全局 `page_no`,不是批内序号**(审核 #003 A7)。prompt 中须显式说明"页号已给出,直接采用,不要自行编号"。
+   - 所有 image 块之后**必须**追加唯一文本块，按图像出现顺序列出 `第 N 页` 映射；其中 **N 必须是全局 `page_no`,不是批内序号**(审核 #003 A7)。prompt 中须显式说明"页号已给出,直接采用,不要自行编号"。
    - **单次请求的 image 块数量必须 ≤ 20**。超过 20 会触发更严的逐图尺寸限制(每张 ≤ 2000 px),使 `ai` 变体的 2576 px 失效。页数 > 20 的文档**必须**分批调用,每批 ≤ 20 页,并在 [03](./03-stage1.md) §5 合并。
 5. **PDF 页禁止走 image 块**。图片格式仅限 JPEG/PNG/GIF/WebP。PDF **必须**以 `document` 块提交(base64,单请求 ≤ 32 MB、≤ 600 页);超限的 PDF 记为 `unsupported` 并进人工队列。
 
@@ -71,7 +71,7 @@ const parsed = Stage1Out.parse(JSON.parse(textOf(res.content)));
 
 1. **必须**在读取 `content` 之前先检查 `stop_reason`。
 2. `stop_reason === 'refusal'`:**必须**读取 `stop_details.category` 与 `explanation` 并原样记入 job 的失败详情。该 job **必须**转入 `needs_human` 终态,**禁止**自动重试(重试同一输入只会再次被拒)。
-3. **必须**启用服务端 fallback:`betas: ['server-side-fallback-2026-07-01']` + `fallbacks: 'default'`。若 fallback 生效,**必须**把实际服务模型 `response.model` 记入工件 —— 否则"同一 prompt 版本产出口径一致"的前提不成立。
+3. Anthropic 路径**必须**启用服务端 fallback:`betas: ['server-side-fallback-2026-07-01']` + `fallbacks: 'default'`；DeepSeek Responses 当前忽略这两个 Anthropic 专用字段。两条路径都**必须**把实际服务模型 `response.model` 记入工件。
 4. 错误分类(与 m1-04 §3 同构,但这里是服务端到服务端):
 
 | 情形 | 处置 |

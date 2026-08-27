@@ -6,6 +6,9 @@ export { getPrompt, loadPrompts, PromptIntegrityError, __resetPromptCache, type 
 export {
   setTransport, setStreamTransport, getTransport, getStreamTransport, type Transport,
 } from './transport.js';
+export {
+  assertNoCassettePii, cassetteFingerprint, cassetteTransport, sanitizeCassetteResponse,
+} from './cassette.js';
 export { planBatches, assertBatchPages, mergeBatches, MergeError } from './stage1-merge.js';
 export {
   buildS1Request, buildS1PdfRequest, callS1, callS1Once, callS1Pdf, callS1PdfOnce,

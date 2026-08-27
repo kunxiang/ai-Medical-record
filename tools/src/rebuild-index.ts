@@ -5,10 +5,13 @@ import { GetObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import postgres from 'postgres';
 import { uuidv7 } from 'uuidv7';
 import {
-  CaptureSidecar, CorrectionSidecar, ManifestLine, PersonSidecar,
-  correctionSortKey, idempotencyFingerprint,
+  CaptureSidecar, CorrectionSidecar, EncounterDecisionPayload, EncounterProposal,
+  FacilityProposal, ManifestLine, PersonSidecar, correctionSortKey, idempotencyFingerprint,
 } from '@amr/contracts';
 import { adminClient, BUCKET } from './s3-admin.js';
+import {
+  type HumanReplayItem, orderedUniqueHumanReplay, parseDecisionObject, parseJournalObject,
+} from './human-replay.js';
 
 const s3 = adminClient();
 const sql = postgres(process.env.DATABASE_URL ?? 'postgres://amr:amr@localhost:5433/amr', {
@@ -124,7 +127,7 @@ for (const [shortId, st] of docState) {
   if (!accountIds.has(cap.uploaded_by)) {
     await sql`
       insert into account (id, email, password_hash, display_name)
-      values (${cap.uploaded_by}, ${'rebuilt+' + cap.uploaded_by.slice(0, 8) + '@local.invalid'}, '!', '重建占位账号')
+      values (${cap.uploaded_by}, ${'rebuilt+' + cap.uploaded_by + '@local.invalid'}, '!', '重建占位账号')
       on conflict (id) do nothing
     `;
     accountIds.add(cap.uploaded_by);
@@ -171,9 +174,203 @@ for (const [shortId, st] of docState) {
 }
 console.log(`documents restored: ${docsRestored}`);
 
-// ── 4. page_move correction 全局回放 ──
-// 人工层 journal/decisions 的完整回放在 m2-07 实现；文档边界不能等到那一步，
-// 否则 split 的目标文档永远只有骨架(A21b)。
+// ── 4. 人工层 journal + decisions 全局回放 ──
+// 先读完所有对象再按内容里的 (at,event_id) 排序；S3 LastModified 不是事实时钟。
+const humanReplay: HumanReplayItem[] = [];
+const journalKeys = (await listKeys('people/'))
+  .filter((key) => /\/journal\/\d{4}-\d{2}\.jsonl$/.test(key));
+for (const key of journalKeys) {
+  const text = await getText(key);
+  if (!text) continue;
+  const parsed = parseJournalObject(key, text);
+  humanReplay.push(...parsed.items);
+  reconciliation.push(...parsed.reconciliation);
+}
+
+const decisionKeys = (await listKeys('_index/decisions/'))
+  .filter((key) => /\/\d{4}-\d{2}\.jsonl$/.test(key));
+for (const key of decisionKeys) {
+  const text = await getText(key);
+  if (!text) continue;
+  const parsed = parseDecisionObject(key, text);
+  humanReplay.push(...parsed.items);
+  reconciliation.push(...parsed.reconciliation);
+}
+
+// encounter 的 L1 载荷携带 facility UUID 快照。先建立 slug→id 映射，确保更早
+// 排序的 facility_confirm 直接用原 UUID 建词表，不产生一条随机 ID 的重复机构。
+const replayFacilityIds = new Map<string, string>();
+for (const item of humanReplay) {
+  if (item.replayKind !== 'normalization_confirm' || item.line.kind !== 'encounter') continue;
+  const payload = EncounterDecisionPayload.safeParse(item.line.payload);
+  if (!payload.success) continue; // 旧版载荷稍后进入对账报告，决策行仍可恢复。
+  const prior = replayFacilityIds.get(payload.data.facility.slug);
+  if (prior && prior !== payload.data.facility.id) {
+    reconciliation.push(`encounter 机构 slug 对应多个 UUID: ${payload.data.facility.slug}`);
+    continue;
+  }
+  replayFacilityIds.set(payload.data.facility.slug, payload.data.facility.id);
+}
+
+async function ensurePlaceholderAccount(accountId: string): Promise<void> {
+  if (accountIds.has(accountId)) return;
+  await sql`
+    insert into account (id, email, password_hash, display_name)
+    values (${accountId}, ${'rebuilt+' + accountId + '@local.invalid'}, '!', '重建占位账号')
+    on conflict (id) do nothing
+  `;
+  accountIds.add(accountId);
+}
+
+let humanEventsReplayed = 0;
+for (const item of orderedUniqueHumanReplay(humanReplay, seenEventIds)) {
+  if (item.replayKind === 'document_archive') {
+    const updated = await sql`
+      update document set archived_at = ${item.line.archived ? item.line.at : null}
+      where short_id = ${item.line.document_short_id}
+      returning id
+    `;
+    if (updated.length === 0) {
+      reconciliation.push(
+        `document_archive 文档不存在: ${item.line.document_short_id} (${item.sourceKey})`,
+      );
+      continue;
+    }
+    humanEventsReplayed += 1;
+    continue;
+  }
+
+  if (item.replayKind === 'person_check_ack') {
+    const updated = await sql`
+      update document set person_check_ack_at = ${item.line.at}
+      where short_id = ${item.line.document_short_id}
+      returning id
+    `;
+    if (updated.length === 0) {
+      reconciliation.push(
+        `person_check_ack 文档不存在: ${item.line.document_short_id} (${item.sourceKey})`,
+      );
+      continue;
+    }
+    humanEventsReplayed += 1;
+    continue;
+  }
+
+  await ensurePlaceholderAccount(item.line.by_account_id);
+  let decisionProposal: Record<string, unknown> = item.line.payload;
+  let encounterPayload: ReturnType<typeof EncounterDecisionPayload.parse> | null = null;
+  if (item.line.kind === 'encounter') {
+    const enriched = EncounterDecisionPayload.safeParse(item.line.payload);
+    if (enriched.success) {
+      encounterPayload = enriched.data;
+      const { facility: _facility, ...proposal } = enriched.data;
+      decisionProposal = EncounterProposal.parse(proposal);
+    } else {
+      const legacy = EncounterProposal.safeParse(item.line.payload);
+      if (legacy.success) decisionProposal = legacy.data;
+    }
+  }
+  await sql`
+    insert into normalization_decision
+      (id, kind, input_fingerprint, proposal, state, decided_by, decided_at,
+       client_operation_id, created_at)
+    values
+      (${uuidv7()}, ${item.line.kind}, ${item.line.input_fingerprint},
+       ${sql.json(decisionProposal as postgres.JSONValue)},
+       ${item.line.decision}, ${item.line.by_account_id}, ${item.line.at},
+       ${item.line.client_operation_id}, ${item.line.at})
+    on conflict (input_fingerprint) do update set
+      kind = excluded.kind,
+      proposal = excluded.proposal,
+      state = excluded.state,
+      decided_by = excluded.decided_by,
+      decided_at = excluded.decided_at,
+      client_operation_id = excluded.client_operation_id
+  `;
+
+  if (item.line.kind === 'facility' && item.line.decision === 'confirmed') {
+    const proposal = FacilityProposal.safeParse(item.line.payload);
+    if (!proposal.success) {
+      reconciliation.push(`facility decision 载荷非法 (${item.sourceKey}): ${item.line.input_fingerprint}`);
+      continue;
+    }
+    const existing = (await sql`
+      select id, aliases from facility where slug = ${proposal.data.facility.slug} limit 1
+    `)[0];
+    if (!existing) {
+      const facilityId = replayFacilityIds.get(proposal.data.facility.slug) ?? uuidv7();
+      await sql`
+        insert into facility (id, slug, name, aliases, city, level)
+        values (${facilityId}, ${proposal.data.facility.slug}, ${proposal.data.facility.name},
+                ${proposal.data.matched_raw_names}, ${proposal.data.facility.city},
+                ${proposal.data.facility.level})
+      `;
+    } else {
+      const aliases = [...new Set([
+        ...existing['aliases'] as string[], ...proposal.data.matched_raw_names,
+      ])];
+      await sql`
+        update facility set name = ${proposal.data.facility.name}, aliases = ${aliases},
+                            city = ${proposal.data.facility.city}, level = ${proposal.data.facility.level}
+        where id = ${existing['id'] as string}
+      `;
+    }
+  }
+
+  if (item.line.kind === 'encounter' && item.line.decision === 'confirmed') {
+    if (!encounterPayload) {
+      reconciliation.push(
+        `encounter decision 缺机构快照，无法执行旧版确认 (${item.sourceKey}): ${item.line.input_fingerprint}`,
+      );
+      continue;
+    }
+    const snapshot = encounterPayload.facility;
+    const facilityRow = (await sql`select id from facility where id = ${snapshot.id} limit 1`)[0];
+    if (!facilityRow) {
+      await sql`
+        insert into facility (id, slug, name, aliases, city, level)
+        values (${snapshot.id}, ${snapshot.slug}, ${snapshot.name}, ${snapshot.aliases},
+                ${snapshot.city}, ${snapshot.level})
+      `;
+    }
+    const memberRows = await sql`
+      select id, person_id from document where id in ${sql(encounterPayload.document_ids)}
+    `;
+    if (memberRows.length !== encounterPayload.document_ids.length
+        || memberRows.some((row) => row['person_id'] !== encounterPayload!.person_id)) {
+      reconciliation.push(
+        `encounter decision 文档骨架或归属不匹配 (${item.sourceKey}): ${encounterPayload.encounter_id}`,
+      );
+      continue;
+    }
+    await sql`
+      insert into encounter
+        (id, person_id, encounter_type, facility_id, department, occurred_on, occurred_at,
+         grouping_basis)
+      values
+        (${encounterPayload.encounter_id}, ${encounterPayload.person_id},
+         ${encounterPayload.encounter_type}, ${snapshot.id}, ${encounterPayload.department},
+         ${encounterPayload.occurred_on}, ${encounterPayload.occurred_at},
+         ${encounterPayload.grouping_basis})
+      on conflict (id) do update set
+        person_id = excluded.person_id,
+        encounter_type = excluded.encounter_type,
+        facility_id = excluded.facility_id,
+        department = excluded.department,
+        occurred_on = excluded.occurred_on,
+        occurred_at = excluded.occurred_at,
+        grouping_basis = excluded.grouping_basis
+    `;
+    await sql`
+      update document set encounter_id = ${encounterPayload.encounter_id}
+      where id in ${sql(encounterPayload.document_ids)}
+    `;
+  }
+  humanEventsReplayed += 1;
+}
+console.log(`human events replayed: ${humanEventsReplayed}`);
+
+// ── 5. page_move correction 全局回放 ──
 const correctionKeys = (await listKeys('people/'))
   .filter((key) => /\/correction-\d{4}\.json$/.test(key));
 const pageMoves: Array<{ key: string; sidecar: Extract<ReturnType<typeof CorrectionSidecar.parse>, { kind: 'page_move' }> }> = [];
@@ -276,6 +473,7 @@ if (reconciliation.length) {
   for (const r of reconciliation) console.log('  - ' + r);
 }
 console.log(JSON.stringify({
-  persons: personKeys.length, documents: docsRestored, page_moves: movesReplayed, reconciliation,
+  persons: personKeys.length, documents: docsRestored, human_events: humanEventsReplayed,
+  page_moves: movesReplayed, reconciliation,
 }));
 await sql.end();

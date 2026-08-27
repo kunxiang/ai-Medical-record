@@ -41,7 +41,8 @@ sources:
 ## Scope
 
 - 已实现：Stage 1 图片路径、版本化 prompt、job 状态机、归人确定性对账、机构归一、二文档就诊归组建议，以及对应的人工确认/拒绝、归人纠正、软归档与文档边界后端接口。
-- 未实现：文档边界可视化操作 UI、其余人工层回放和 M2 总验收。弱网大文件 multipart 已在采集链源码实现，发布与 owner 验收状态见采集功能页。
+- 已实现：人工 archive/ack/facility+encounter normalization 可仅凭 L1 删库重建；回放不读取 AI 工件、不投递 job、不写回 journal。
+- 未实现：文档边界可视化操作 UI、A 组剩余 24 项跨层验收、真实 wire cassette 和 C 组真实单据质量基线。当前 18/42 个 A 场景已自动化、B 组 15/15；弱网大文件 multipart 已在采集链源码实现，发布与 owner 验收状态见采集功能页。
 - 明确不做：Stage 2 化验值提取、单位换算、医学判断、检索、趋势和导出。
 
 ## API / Behavior
@@ -88,13 +89,13 @@ sources:
 - 检查 split/merge/move-page 前后原件与既有 capture/page sidecar 摘要不变，页号连续且 `capture_order` 不变。
 - 检查移页后的预览内容对应新的逻辑页，且同一个 `client_operation_id` 重试不新增 correction。
 - 检查无权限与不存在文档的 AI 路由都返回不可区分的 404。
-- M2 总验收脚本尚未落地，因此不得宣称 M2 已完成。
+- `pnpm m2:acceptance` 当前运行 18/42 个 A 候选场景与 B 组 15/15；4 个模型盒均为 synthetic，真实 wire 录制前不得把第一批或 M2 宣称为已验收。
 - 发布并完成知识索引后，由项目所有者验证搜索“归人从不静默默认”能命中本页。
 
 ## Risks and Fallback
 
 - 边界操作目前没有前端入口，需通过受鉴权 API 调用；误操作只能通过新的人工纠正操作表达，不能改写 L1。
-- 完整 archive/ack/normalization 人工层回放仍在 M2 后续任务中；page-move correction 已可由重建工具恢复。
+- 旧版 encounter decision 若不含 facility 快照，只恢复决策行并进入对账；不能自动猜测外键。新确认记录可完整恢复 encounter 与 `grouping_basis`。
 - 未配置 AI key 时，采集和浏览仍可用；AI job 失败并保留可见状态。
 - PDF 超限或损坏只终止 AI 处理，不删除 L1 原件。
 - AI 结果属于可重建层；任何人工处理在 journal/replay 完成前都不能被视为完整交付。
@@ -106,3 +107,4 @@ sources:
 - 2026-08-24：建立 rollout 功能知识页，并登记当前限制。
 - 2026-08-26：机构归一、就诊归组建议、人工审核、归人纠正与软归档进入实现完成/待运行验收状态。
 - 2026-08-26：正常 PDF document-block、内部页序校验和 32 MiB/600 页门禁实现完成。
+- 2026-08-27：人工层回放与第一批 candidate harness 落地；18/42 个 A 场景自动化、B=15/15。独立审查发现 4 个盒是 synthetic stub，已显式标记 provenance 并撤回第一批验收声明；M2 仍待真实 wire cassette、其余 A 项与延期 C 组基线。

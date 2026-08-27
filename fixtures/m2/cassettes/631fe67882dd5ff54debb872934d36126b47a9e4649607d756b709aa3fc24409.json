@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0",
+  "provenance": "synthetic",
+  "fingerprint": "631fe67882dd5ff54debb872934d36126b47a9e4649607d756b709aa3fc24409",
+  "request": {
+    "model": "claude-opus-5",
+    "prompt_sha256": "11b852c39456b47451bab1deeca2e204488b85244200e728ac3a60d0616373b9",
+    "media": ["derived/p23456/d23458/ai-01.webp"],
+    "page_order": [1],
+    "request_sha256": "f2dd255d1784ac9a30e99997a589e56d8a6740f974bea10c3e5408ca25b1eb59"
+  },
+  "response": {
+    "id": "synthetic-stage1-reuse-v3",
+    "type": "message",
+    "role": "assistant",
+    "model": "synthetic-model",
+    "content": [{
+      "type": "text",
+      "text": "{\"doc_type\":\"lab_report\",\"doc_type_confidence\":0.97,\"patient_name\":\"P1\",\"patient_sex\":\"female\",\"patient_age_text\":null,\"patient_identifiers\":[],\"facility_name_raw\":\"F1\",\"department_raw\":null,\"sampled_on\":\"2026-08-22\",\"reported_on\":\"2026-08-22\",\"event_at\":null,\"summary\":\"合成复用验收\",\"pages\":[{\"page_no\":1,\"page_label\":null,\"page_index\":null,\"page_total\":null,\"full_text\":\"P1 F1 合成复用验收\"}],\"pii_spans\":[],\"boundary_hint\":null,\"unmodeled\":[]}"
+    }],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {"input_tokens": 100, "output_tokens": 80, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
+  }
+}

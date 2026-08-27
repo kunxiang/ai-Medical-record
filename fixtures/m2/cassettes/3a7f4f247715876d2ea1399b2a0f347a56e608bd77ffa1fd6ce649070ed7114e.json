@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0",
+  "provenance": "synthetic",
+  "fingerprint": "3a7f4f247715876d2ea1399b2a0f347a56e608bd77ffa1fd6ce649070ed7114e",
+  "request": {
+    "model": "claude-opus-5",
+    "prompt_sha256": "11b852c39456b47451bab1deeca2e204488b85244200e728ac3a60d0616373b9",
+    "media": ["derived/p23456/d23457/ai-01.webp"],
+    "page_order": [1],
+    "request_sha256": "a002b73b0ff767dc67eeda76d748227d55eaed7754b82c751386e1bf0e6c3834"
+  },
+  "response": {
+    "id": "synthetic-stage1-mismatch-v3",
+    "type": "message",
+    "role": "assistant",
+    "model": "synthetic-model",
+    "content": [{
+      "type": "text",
+      "text": "{\"doc_type\":\"lab_report\",\"doc_type_confidence\":0.98,\"patient_name\":\"P2\",\"patient_sex\":\"female\",\"patient_age_text\":null,\"patient_identifiers\":[],\"facility_name_raw\":\"F1\",\"department_raw\":null,\"sampled_on\":\"2026-08-21\",\"reported_on\":\"2026-08-21\",\"event_at\":null,\"summary\":\"合成不一致验收\",\"pages\":[{\"page_no\":1,\"page_label\":null,\"page_index\":null,\"page_total\":null,\"full_text\":\"P2 F1 合成不一致验收\"}],\"pii_spans\":[],\"boundary_hint\":null,\"unmodeled\":[]}"
+    }],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {"input_tokens": 100, "output_tokens": 80, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
+  }
+}

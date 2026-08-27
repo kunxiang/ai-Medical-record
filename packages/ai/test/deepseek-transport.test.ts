@@ -20,7 +20,10 @@ describe('DeepSeek transport adapter', () => {
     };
     expect(request.input[0]!.content).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'input_image', image_url: 'https://s3.example/ai-07.webp' }),
-      expect.objectContaining({ type: 'input_text', text: '第 7 页:' }),
+      expect.objectContaining({
+        type: 'input_text',
+        text: expect.stringContaining('第 7 页'),
+      }),
     ]));
     expect(request.text.format).toMatchObject({ type: 'json_schema', name: 'amr_structured_output' });
     expect(request.text.format.schema).toHaveProperty('properties.doc_type');

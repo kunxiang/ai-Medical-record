@@ -1,0 +1,12 @@
+# M2 验收专用覆盖：使用独立 Compose project + host 端口，避免触碰开发/生产本机卷。
+services:
+  postgres:
+    network_mode: bridge
+    ports:
+      - "127.0.0.1::5432"
+
+  minio:
+    network_mode: bridge
+    ports:
+      - "127.0.0.1::9000"
+      - "127.0.0.1::9101"

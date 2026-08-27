@@ -1,4 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { appendFileSync } from 'node:fs';
+import { cassetteTransportFromEnv } from './cassette.js';
 import { deepSeekTransport } from './deepseek-transport.js';
 import { AI_PROVIDER } from './models.js';
 
@@ -30,13 +32,25 @@ const realStreamTransport: Transport = async (params) =>
     ? deepSeekTransport(params)
     : realClient().beta.messages.stream(params).finalMessage();
 
-let current: Transport = realTransport;
-let currentStream: Transport = realStreamTransport;
+function observed(transport: Transport): Transport {
+  const callLog = process.env.AMR_AI_CALL_LOG?.trim();
+  if (!callLog) return transport;
+  return async (params) => {
+    appendFileSync(callLog, JSON.stringify({ model: params.model, at: new Date().toISOString() }) + '\n');
+    return transport(params);
+  };
+}
+
+const defaultTransport = observed(cassetteTransportFromEnv(realTransport));
+const defaultStreamTransport = observed(cassetteTransportFromEnv(realStreamTransport));
+
+let current: Transport = defaultTransport;
+let currentStream: Transport = defaultStreamTransport;
 
 export function setTransport(t: Transport | null): void {
-  current = t ?? realTransport;
+  current = t ?? defaultTransport;
   // 录制/回放注入必须同时覆盖普通与提额流式路径，否则 max_tokens 测试会意外访问真实网络。
-  currentStream = t ?? realStreamTransport;
+  currentStream = t ?? defaultStreamTransport;
 }
 
 export function getTransport(): Transport {
@@ -49,5 +63,5 @@ export function getStreamTransport(): Transport {
 
 /** 仅供录制/回放和测试分别观察提额流式路径。 */
 export function setStreamTransport(t: Transport | null): void {
-  currentStream = t ?? realStreamTransport;
+  currentStream = t ?? defaultStreamTransport;
 }

@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0",
+  "provenance": "synthetic",
+  "fingerprint": "08faed5a1598138f785ed98213f52d7fe0b7457b71accaba544e0da236de9dfe",
+  "request": {
+    "model": "claude-opus-5",
+    "prompt_sha256": "0f33b54491bea0333251dc0fe7b582cbf9c220bacabc4e9073e0dcbd3bcf3ef6",
+    "media": [],
+    "page_order": [],
+    "request_sha256": "f8049fa7a34cec4feede6ce8f103c7d5a9b8a335d5d1c9c8d50f85941da60aee"
+  },
+  "response": {
+    "id": "synthetic-facility-create-v1",
+    "type": "message",
+    "role": "assistant",
+    "model": "synthetic-model",
+    "content": [{
+      "type": "text",
+      "text": "{\"action\":\"create\",\"existing_facility_slug\":null,\"name\":\"F1\",\"city\":null,\"level\":null,\"confidence\":0.95,\"reason\":\"合成验收机构\"}"
+    }],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {"input_tokens": 30, "output_tokens": 20, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
+  }
+}
