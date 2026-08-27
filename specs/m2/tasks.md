@@ -133,12 +133,12 @@
 
 ## Milestone 6: L1 回放与 M2 总验收
 
-- [ ] **[S] [ops] Runtime credential**: 让 API 容器读取非空 `ANTHROPIC_API_KEY`，重跑失败 S1 并验证一个真实 job 到 `done`
+- [x] **[S] [ops] Runtime credential**: 让 API 容器读取非空视觉提供方凭证，重跑失败 S1 并验证一个真实 job 到 `done`
   - 文件: `infra/.env.local`（Git 忽略，不提交）, `infra/docker-compose.medireco.yml`
   - Spec: `specs/m2/02-ai-client.md` §1；`docs/11-deployment.md` §2
   - Wiki 引用: `feature_wiki/ai-metadata-and-jobs.md` Operation Guide
-  - verify (auto): `docker exec medireco-api sh -lc 'test -n "$ANTHROPIC_API_KEY"'`
-  - verify (manual): 用户提供/配置有效凭证；不得在日志或仓库暴露密钥
+  - verify (auto): `docker exec ai-medical-record-api-1 sh -lc 'test "$AI_PROVIDER" = deepseek && test -n "$DEEPSEEK_API_KEY"'`
+  - verify (manual): 2026-08-27 项目所有者明确授权生产医疗图片/PDF 发送至 DeepSeek；真实 JPEG job 到 `done`，工件 model=`deepseek-v4-flash-vision-exp`；密钥未进日志或仓库
 
 - [ ] **[L] [backend] Human-layer replay**: 回放 archive/ack/normalization，未知事件继续，零 AI 调用
   - 文件: `tools/src/rebuild-index.ts`, `tools/src/verify-rebuild.ts`

@@ -186,7 +186,6 @@ implementation_candidates:
     - specs/m2/RESULTS.md
 
 blocking_unknowns:
-  - "DeepSeek 视觉实验模型尚需部署后用真实上传文档验证一个 job 到 done。"
   - "The M2 regression corpus of at least 20 de-identified real documents has not been provided."
 
 invalidations:

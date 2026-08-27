@@ -67,6 +67,7 @@ owners: ["ai-medical-record"]
 ## 当前门禁
 
 - M0/M1 已于 2026-08-26 经项目所有者确认验收并关闭；剩余人工项没有新增独立执行证据，已在各自 `RESULTS.md` 如实记录。
-- 2026-08-26 测试部署已配置 DeepSeek `deepseek-v4-flash-vision-exp`；账户 `/models` 与非敏感图片/PDF 探针均确认视觉输入可用。图片/文本使用 Responses API 严格 JSON Schema，PDF 使用 Anthropic document 兼容层并在本地 Zod 再校验。仍须有一个真实上传文档 job 到 `done` 后才能宣称线上 AI 可用。
+- 2026-08-27 DeepSeek `deepseek-v4-flash-vision-exp` 已上线；图片/文本使用 Responses API 严格 JSON Schema，PDF 使用 Anthropic document 兼容层并在本地 Zod 再校验。一个真实上传 JPEG Stage 1 job 已到 `done`，工件记录实际模型、1 页、2010 input / 982 output / 1536 cache-read tokens；线上 AI 运行门禁已满足。
+- 真实作业同时确认了人工兜底：另一份文档的 `event_at` 未符合 RFC3339，作业正确进入 `needs_human/invalid_output`，没有将不合规数据落库。`GET /api/v1/jobs` 对旧错误记录缺少 `category` 的 500 已由契约默认 `null` 修复，线上回归为 200。
 - 文档边界实现已通过类型、单元与构建门禁；尚未在现有本机档案上执行破坏逻辑归属的人工冒烟，需用专用测试文档验收移页后预览。
-- multipart 源码和目标测试已通过；当前测试部署尚未发布本工作树，真实 12 MiB 上传、刷新后只补缺失 part 及整文件登记仍需项目所有者在发布后验收。
+- multipart 已发布，真实 12 MiB 探针通过 create/sign/part PUT/ETag CORS/仅签缺失 part/complete/整文件 SHA-256，探针产生的 L2 数据已清理。
