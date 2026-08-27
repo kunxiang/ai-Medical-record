@@ -1,20 +1,33 @@
 import { useEffect, useState } from 'react';
-import { createPortal } from 'react-dom';
 import {
-  CalendarDays, CircleUserRound, Clock3, KeyRound, LoaderCircle, LogOut, Mail,
-  ShieldCheck, Trash2, TriangleAlert, X,
+  CalendarDays, CircleUserRound, Clock3, KeyRound, LogOut, Mail,
+  ShieldCheck, Trash2, TriangleAlert,
 } from 'lucide-react';
 import type { AccountProfileT } from '@amr/contracts';
 import { api, ApiFailure } from '../../api/client.js';
+import { PageHeader } from '../../ui/PageHeader.js';
+import { Card } from '../../ui/Card.js';
+import { Button } from '../../ui/Button.js';
+import { Dialog } from '../../ui/Dialog.js';
+import { Field } from '../../ui/Field.js';
+import { Input } from '../../ui/Input.js';
+import { Alert } from '../../ui/Alert.js';
+import { cn } from '../../ui/cn.js';
 
 function formatCreatedAt(value: string): string {
   return new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   }).format(new Date(value));
 }
 
 export function AccountView({
-  queuedItemCount, onLogout, onDeleteAccount,
+  queuedItemCount,
+  onLogout,
+  onDeleteAccount,
 }: {
   queuedItemCount: number;
   onLogout: () => void;
@@ -31,20 +44,17 @@ export function AccountView({
   useEffect(() => {
     let cancelled = false;
     void api.account().then(
-      (value) => { if (!cancelled) setProfile(value); },
-      () => { if (!cancelled) setLoadError('账户信息暂时无法加载，请检查网络后重试。'); },
+      (value) => {
+        if (!cancelled) setProfile(value);
+      },
+      () => {
+        if (!cancelled) setLoadError('账户信息暂时无法加载，请检查网络后重试。');
+      },
     );
-    return () => { cancelled = true; };
-  }, []);
-
-  useEffect(() => {
-    if (!deleteOpen) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !deleting) setDeleteOpen(false);
+    return () => {
+      cancelled = true;
     };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [deleteOpen, deleting]);
+  }, []);
 
   const closeDelete = () => {
     if (deleting) return;
@@ -70,99 +80,210 @@ export function AccountView({
   };
 
   return (
-    <div className="page-view account-view">
-      <div className="page-heading account-heading">
-        <div>
-          <span className="eyebrow">账户与隐私</span>
-          <h1>账户中心</h1>
-          <p>查看登录身份、管理当前会话，并控制账户访问权限。</p>
-        </div>
-        <span className="security-pill"><ShieldCheck size={17} /> 登录信息受保护</span>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="账户与隐私"
+        title="账户中心"
+        description="查看登录身份、管理当前会话，并控制账户访问权限。"
+        action={
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-white/90 text-brand-700 border border-brand-200 shadow-2xs">
+            <ShieldCheck size={16} className="text-brand-600" /> 登录信息受保护
+          </span>
+        }
+      />
 
-      <section className="surface account-profile-card" aria-labelledby="account-profile-title">
-        <div className="account-profile-hero">
-          <span className="account-avatar"><CircleUserRound size={34} /></span>
-          <div>
-            <small>当前账户</small>
-            <h2 id="account-profile-title">{profile?.display_name ?? '正在加载…'}</h2>
-            <p>{profile?.email ?? '读取账户信息'}</p>
+      {/* Account Profile Card */}
+      <Card className="space-y-6" aria-labelledby="account-profile-title">
+        <div className="flex items-center gap-4">
+          <div className="w-14 h-14 rounded-2xl bg-brand-500 text-white flex items-center justify-center shrink-0 shadow-sm font-bold text-xl">
+            {profile?.display_name ? (
+              profile.display_name.slice(0, 1)
+            ) : (
+              <CircleUserRound size={32} />
+            )}
+          </div>
+          <div className="space-y-0.5 min-w-0">
+            <span className="text-xs font-bold text-brand-600 tracking-wide uppercase">
+              当前账户
+            </span>
+            <h2 id="account-profile-title" className="text-xl font-bold text-ink truncate">
+              {profile?.display_name ?? '正在加载…'}
+            </h2>
+            <p className="text-xs text-muted truncate">{profile?.email ?? '读取账户信息'}</p>
           </div>
         </div>
 
         {loadError ? (
-          <div className="banner warn account-load-error"><TriangleAlert size={18} /><span>{loadError}</span></div>
+          <Alert variant="warning">
+            <span>{loadError}</span>
+          </Alert>
         ) : (
-          <dl className="account-details" aria-busy={!profile}>
-            <div><dt><Mail size={17} /> 邮箱地址</dt><dd>{profile?.email ?? '—'}</dd></div>
-            <div><dt><CircleUserRound size={17} /> 显示名称</dt><dd>{profile?.display_name ?? '—'}</dd></div>
-            <div><dt><Clock3 size={17} /> 时区</dt><dd>{profile?.timezone ?? '—'}</dd></div>
-            <div><dt><CalendarDays size={17} /> 注册时间</dt><dd>{profile ? formatCreatedAt(profile.created_at) : '—'}</dd></div>
-          </dl>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-line/60">
+            <div className="flex items-start gap-3 p-3.5 rounded-xl bg-surface-subtle border border-line/60">
+              <Mail size={18} className="text-brand-600 mt-0.5 shrink-0" />
+              <div className="space-y-0.5">
+                <span className="text-xs text-muted block">邮箱地址</span>
+                <strong className="text-sm text-ink font-semibold block">{profile?.email ?? '—'}</strong>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3 p-3.5 rounded-xl bg-surface-subtle border border-line/60">
+              <CircleUserRound size={18} className="text-brand-600 mt-0.5 shrink-0" />
+              <div className="space-y-0.5">
+                <span className="text-xs text-muted block">显示名称</span>
+                <strong className="text-sm text-ink font-semibold block">{profile?.display_name ?? '—'}</strong>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3 p-3.5 rounded-xl bg-surface-subtle border border-line/60">
+              <Clock3 size={18} className="text-brand-600 mt-0.5 shrink-0" />
+              <div className="space-y-0.5">
+                <span className="text-xs text-muted block">时区</span>
+                <strong className="text-sm text-ink font-semibold block">{profile?.timezone ?? '—'}</strong>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3 p-3.5 rounded-xl bg-surface-subtle border border-line/60">
+              <CalendarDays size={18} className="text-brand-600 mt-0.5 shrink-0" />
+              <div className="space-y-0.5">
+                <span className="text-xs text-muted block">注册时间</span>
+                <strong className="text-sm text-ink font-semibold block">
+                  {profile ? formatCreatedAt(profile.created_at) : '—'}
+                </strong>
+              </div>
+            </div>
+          </div>
         )}
-      </section>
+      </Card>
 
-      <section className="surface account-session-card">
-        <div className="section-heading">
-          <span className="section-icon"><KeyRound size={20} /></span>
-          <div><h2>当前会话</h2><p>退出只结束当前浏览器的登录，不会删除已经保存的数据。</p></div>
-        </div>
-        <button type="button" className="account-action-button" onClick={onLogout} data-testid="logout-button">
-          <LogOut size={18} /> 退出登录
-        </button>
-      </section>
-
-      <section className="surface danger-zone">
-        <div className="section-heading">
-          <span className="section-icon danger-icon"><Trash2 size={20} /></span>
-          <div>
-            <h2>注销账户</h2>
-            <p>注销后无法恢复登录。医疗档案和审计记录仍按治理规则保留，但此账户将失去全部访问权。</p>
+      {/* Session Management Card */}
+      <Card className="space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-line/60">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center shrink-0">
+              <KeyRound size={20} />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-ink">当前会话</h2>
+              <p className="text-xs text-muted">退出只结束当前浏览器的登录，不会删除已经保存的数据。</p>
+            </div>
           </div>
         </div>
-        <button type="button" className="account-action-button danger" onClick={() => setDeleteOpen(true)} data-testid="open-delete-account">
-          <Trash2 size={18} /> 注销我的账户
-        </button>
-      </section>
 
-      {deleteOpen && createPortal(
-        <div className="account-dialog-backdrop" role="presentation" onMouseDown={(event) => {
-          if (event.target === event.currentTarget) closeDelete();
-        }}>
-          <section className="account-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-account-title">
-            <button type="button" className="dialog-close" onClick={closeDelete} aria-label="关闭"><X size={20} /></button>
-            <span className="dialog-danger-icon"><TriangleAlert size={26} /></span>
-            <h2 id="delete-account-title">确认注销账户</h2>
-            <p>这个操作不可撤销。你的登录身份会被匿名化，全部登录令牌和档案访问权将立即失效。</p>
+        <div className="pt-1">
+          <Button
+            variant="secondary"
+            size="md"
+            onClick={onLogout}
+            iconLeft={<LogOut size={17} />}
+            data-testid="logout-button"
+            className="rounded-xl font-semibold hover:bg-brand-50 hover:text-brand-700"
+          >
+            退出登录
+          </Button>
+        </div>
+      </Card>
+
+      {/* Danger Zone: Account Deletion */}
+      <Card className="space-y-4 bg-danger-bg/30 border-danger-border/60">
+        <div className="flex items-center justify-between pb-3 border-b border-danger-border/40">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-danger-bg text-danger flex items-center justify-center shrink-0 border border-danger-border/60">
+              <Trash2 size={20} />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-ink">注销账户</h2>
+              <p className="text-xs text-muted">
+                注销后无法恢复登录。医疗档案和审计记录仍按治理规则保留，但此账户将失去全部访问权。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="pt-1">
+          <Button
+            variant="danger-soft"
+            size="md"
+            onClick={() => setDeleteOpen(true)}
+            iconLeft={<Trash2 size={17} />}
+            data-testid="open-delete-account"
+            className="rounded-xl font-semibold"
+          >
+            注销我的账户
+          </Button>
+        </div>
+      </Card>
+
+      {/* Delete Confirmation Modal */}
+      {deleteOpen && (
+        <Dialog
+          open
+          onClose={closeDelete}
+          icon={<TriangleAlert size={26} className="text-danger" />}
+          title="确认注销账户"
+          description="这个操作不可撤销。你的登录身份会被匿名化，全部登录令牌和档案访问权将立即失效。"
+          aria-labelledby="delete-account-title"
+          size="md"
+        >
+          <div className="space-y-4 pt-1">
             {queuedItemCount > 0 && (
-              <div className="delete-queue-warning">
-                <TriangleAlert size={18} />
-                <span>当前设备还有 <strong>{queuedItemCount}</strong> 项未上传内容。注销成功后，这些本地原件将被永久清除。</span>
-              </div>
+              <Alert variant="warning">
+                <span>
+                  当前设备还有 <strong>{queuedItemCount}</strong> 项未上传内容。注销成功后，这些本地原件将被永久清除。
+                </span>
+              </Alert>
             )}
-            <label className="field-label">
-              <span>输入当前密码</span>
-              <span className="input-shell">
-                <KeyRound size={19} />
-                <input autoFocus type="password" value={password} onChange={(event) => setPassword(event.target.value)}
-                       autoComplete="current-password" data-testid="delete-account-password" />
+
+            <Field label="输入当前密码" required>
+              <Input
+                autoFocus
+                iconLeft={<KeyRound size={17} />}
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                data-testid="delete-account-password"
+                placeholder="验证你的当前密码"
+                required
+              />
+            </Field>
+
+            <label className="flex items-start gap-2.5 p-3 rounded-xl bg-surface-subtle border border-line/80 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={understood}
+                onChange={(e) => setUnderstood(e.target.checked)}
+                className="mt-0.5 w-4 h-4 rounded text-brand-600 focus:ring-brand-500 cursor-pointer"
+              />
+              <span className="text-xs font-medium text-ink-secondary leading-snug">
+                我理解账户无法恢复，且本机未上传内容会被删除。
               </span>
             </label>
-            <label className="delete-understanding">
-              <input type="checkbox" checked={understood} onChange={(event) => setUnderstood(event.target.checked)} />
-              <span>我理解账户无法恢复，且本机未上传内容会被删除。</span>
-            </label>
-            {deleteError && <p className="error dialog-error" data-testid="delete-account-error">{deleteError}</p>}
-            <div className="dialog-actions">
-              <button type="button" className="dialog-cancel" onClick={closeDelete} disabled={deleting}>取消</button>
-              <button type="button" className="dialog-confirm-danger" onClick={() => void submitDelete()}
-                      disabled={!password || !understood || deleting} data-testid="confirm-delete-account">
-                {deleting ? <><LoaderCircle className="spin" size={18} /> 正在注销…</> : <><Trash2 size={18} /> 永久注销账户</>}
-              </button>
+
+            {deleteError && (
+              <Alert variant="danger" data-testid="delete-account-error">
+                {deleteError}
+              </Alert>
+            )}
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-line/60">
+              <Button variant="ghost" onClick={closeDelete} disabled={deleting}>
+                取消
+              </Button>
+              <Button
+                variant="danger"
+                loading={deleting}
+                disabled={!password || !understood || deleting}
+                onClick={() => void submitDelete()}
+                iconLeft={!deleting ? <Trash2 size={17} /> : undefined}
+                data-testid="confirm-delete-account"
+                className="rounded-xl shadow-xs"
+              >
+                永久注销账户
+              </Button>
             </div>
-          </section>
-        </div>,
-        document.body,
+          </div>
+        </Dialog>
       )}
     </div>
   );

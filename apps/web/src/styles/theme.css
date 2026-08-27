@@ -146,8 +146,18 @@
   --color-danger-border: var(--danger-border);
   --color-danger-text: var(--danger-text);
 
+  --color-info: var(--info);
+  --color-info-bg: var(--info-bg);
+  --color-info-border: var(--info-border);
+  --color-info-text: var(--info-text);
+
   --font-sans: var(--font-family-base);
   --font-mono: var(--font-family-mono);
 
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-soft: var(--shadow-soft);
   --shadow-default: var(--shadow);
+  --shadow-modal: var(--shadow-modal);
+  --shadow-brand: var(--shadow-brand);
 }
