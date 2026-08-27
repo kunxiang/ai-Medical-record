@@ -243,13 +243,16 @@ export async function rotateDraftPage(
   return { blob: rotated.blob, width: rotated.width, height: rotated.height, sha256: sha };
 }
 
-/** 删除草稿中的单页并重新排列页码序号 */
+/** 删除草稿或待上传记录中的单页并重新排列页码序号 */
 export async function deleteDraftPage(
   clientDocumentId: string,
   pageNo: number,
 ): Promise<CaptureRecord | undefined> {
   const rec = await getCapture(clientDocumentId);
-  if (!rec || rec.state !== 'draft') throw new Error('只能删除草稿中的页面');
+  if (!rec) return undefined;
+  if (!['draft', 'pending_person', 'pending', 'failed_terminal'].includes(rec.state)) {
+    throw new Error('该记录正在上传中，暂不能删除单页');
+  }
 
   const blobs = await blobsOf(clientDocumentId, rec.page_count);
   const remaining = blobs.filter((b) => b.page_no !== pageNo);

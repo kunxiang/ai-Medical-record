@@ -325,8 +325,18 @@ export function QueuePanel({
             setQueueVersion((v) => v + 1);
             await onChanged();
           }}
-          onDelete={async () => {
-            setModalState(null);
+          onDelete={async (pageNo) => {
+            const { deleteDraftPage } = await import('../../offline/capture.js');
+            const remaining = await deleteDraftPage(modalState.docId, pageNo);
+            if (!remaining || remaining.page_count === 0) {
+              setModalState(null);
+            } else {
+              const { blobsOf } = await import('../../offline/db.js');
+              const updatedBlobs = await blobsOf(modalState.docId, remaining.page_count);
+              setModalState((prev) => (prev ? { ...prev, blobs: updatedBlobs } : null));
+            }
+            setQueueVersion((v) => v + 1);
+            await onChanged();
           }}
           onFinish={async () => {
             await tick('modal-finish');
