@@ -1,4 +1,4 @@
-import { and, eq, inArray, lt, lte, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, lt, lte, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import {
   ProcessingJobEnvelope,
@@ -50,7 +50,7 @@ export async function availablePlugins(maxAgeMs = ACTIVE_PLUGIN_MAX_AGE_MS): Pro
   metadata: Record<string, unknown>;
 }>> {
   const rows = await db.select().from(processingPlugin)
-    .where(sql`${processingPlugin.lastHeartbeatAt} >= ${new Date(Date.now() - maxAgeMs)}`)
+    .where(gte(processingPlugin.lastHeartbeatAt, new Date(Date.now() - maxAgeMs)))
     .orderBy(processingPlugin.pluginId);
   return rows.map((row) => ({
     pluginId: row.pluginId,

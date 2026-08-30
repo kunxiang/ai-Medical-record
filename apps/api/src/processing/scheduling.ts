@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { and, eq, isNull, max, sql } from 'drizzle-orm';
+import { and, eq, gte, isNull, max, sql } from 'drizzle-orm';
 import {
   canonicalJsonString,
   type ProcessingCapabilityT,
@@ -19,7 +19,7 @@ async function activePluginFor(tx: Tx, capability: ProcessingCapabilityT): Promi
     pluginId: processingPlugin.pluginId,
     pluginVersion: processingPlugin.pluginVersion,
   }).from(processingPlugin).where(and(
-    sql`${processingPlugin.lastHeartbeatAt} >= ${new Date(Date.now() - ACTIVE_PLUGIN_MAX_AGE_MS)}`,
+    gte(processingPlugin.lastHeartbeatAt, new Date(Date.now() - ACTIVE_PLUGIN_MAX_AGE_MS)),
     sql`${capability} = any(${processingPlugin.capabilities})`,
   )).orderBy(processingPlugin.pluginId).limit(1))[0];
   return row ?? null;
