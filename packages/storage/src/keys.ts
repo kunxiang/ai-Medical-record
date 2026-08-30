@@ -7,12 +7,15 @@ const DSLUG = `d${A}{5}`;
 const DATE = '\\d{4}-\\d{2}-\\d{2}';
 const EXT = '(?:jpg|png|webp|pdf)';
 const QKEY = '[a-z0-9_]{1,32}';
+const CONTEXT_QKEY = '[a-z][a-z0-9_]{1,63}';
+const CONTEXT_EXT = '(?:m4a|webm|mp3|wav|jpg|png|webp)';
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 
 const KEY_BYTES_RE = /^[a-z0-9._/-]+$/;
 
 /** 派生物变体(ADR-050 新增 ai:送进模型的输入,旋正 + 长边 2576 + q92) */
 export type DerivativeVariant = 'thumb' | 'preview' | 'ai';
+export type ContextMediaExtension = 'm4a' | 'webm' | 'mp3' | 'wav' | 'jpg' | 'png' | 'webp';
 
 export type ParsedKey =
   | { kind: 'page'; personSlug: string; year: string; captureDate: string; docShortId: string; pageNo: number; ext: string }
@@ -20,6 +23,8 @@ export type ParsedKey =
   | { kind: 'capture'; personSlug: string; year: string; captureDate: string; docShortId: string }
   | { kind: 'correction'; personSlug: string; year: string; captureDate: string; docShortId: string; seq: number }
   | { kind: 'audio'; personSlug: string; year: string; captureDate: string; docShortId: string; qkey: string; ext: 'm4a' | 'json' }
+  | { kind: 'contextMedia'; personSlug: string; sessionId: string; questionKey: string; uploadId: string; ext: ContextMediaExtension }
+  | { kind: 'contextMediaMeta'; personSlug: string; sessionId: string; questionKey: string; uploadId: string }
   | { kind: 'person'; personSlug: string }
   | { kind: 'journal'; personSlug: string; year: string; month: string }
   | { kind: 'manifest'; year: string; month: string }
@@ -58,6 +63,17 @@ export const buildKey = {
   },
   audio: (p: { personSlug: string; captureDate: string; docShortId: string; qkey: string; ext: 'm4a' | 'json' }) =>
     check(`${docdirPrefix(p.personSlug, p.captureDate, p.docShortId)}/audio/${p.qkey}.${p.ext}`),
+  contextMedia: (p: {
+    personSlug: string; sessionId: string; questionKey: string; uploadId: string;
+    ext: ContextMediaExtension;
+  }) => check(
+    `people/${p.personSlug}/context/${p.sessionId}/${p.questionKey}__${p.uploadId}.${p.ext}`,
+  ),
+  contextMediaMeta: (p: {
+    personSlug: string; sessionId: string; questionKey: string; uploadId: string;
+  }) => check(
+    `people/${p.personSlug}/context/${p.sessionId}/${p.questionKey}__${p.uploadId}.json`,
+  ),
   person: (p: { personSlug: string }) => check(`people/${p.personSlug}/_person.json`),
   journal: (p: { personSlug: string; year: string; month: string }) =>
     check(`people/${p.personSlug}/journal/${p.year}-${p.month}.jsonl`),
@@ -116,6 +132,20 @@ const MATCHERS: Array<[RegExp, (m: RegExpExecArray) => ParsedKey]> = [
   [
     new RegExp(`^people/(${PSLUG})/(\\d{4})/(${DATE})__(${DSLUG})/audio/(${QKEY})\\.(m4a|json)$`),
     (m) => ({ kind: 'audio', personSlug: m[1]!, year: m[2]!, captureDate: m[3]!, docShortId: m[4]!, qkey: m[5]!, ext: m[6]! as 'm4a' | 'json' }),
+  ],
+  [
+    new RegExp(`^people/(${PSLUG})/context/(${UUID})/(${CONTEXT_QKEY})__(${UUID})\\.(${CONTEXT_EXT})$`),
+    (m) => ({
+      kind: 'contextMedia', personSlug: m[1]!, sessionId: m[2]!, questionKey: m[3]!,
+      uploadId: m[4]!, ext: m[5]! as ContextMediaExtension,
+    }),
+  ],
+  [
+    new RegExp(`^people/(${PSLUG})/context/(${UUID})/(${CONTEXT_QKEY})__(${UUID})\\.json$`),
+    (m) => ({
+      kind: 'contextMediaMeta', personSlug: m[1]!, sessionId: m[2]!, questionKey: m[3]!,
+      uploadId: m[4]!,
+    }),
   ],
   [new RegExp(`^people/(${PSLUG})/_person\\.json$`), (m) => ({ kind: 'person', personSlug: m[1]! })],
   [

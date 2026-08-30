@@ -10,6 +10,10 @@ const RANK: Record<Role, number> = { viewer: 0, editor: 1, owner: 2 };
 
 /** spec m0-05 §3:唯二检查点之一。无行/角色不足/已归档 → 一律 404,不可区分。 */
 export async function requirePersonAccess(accountId: string, personId: string, minRole: Role): Promise<void> {
+  await requirePersonRole(accountId, personId, minRole);
+}
+
+export async function requirePersonRole(accountId: string, personId: string, minRole: Role): Promise<Role> {
   const rows = await db
     .select({ role: personAccess.role, archivedAt: person.archivedAt })
     .from(personAccess)
@@ -20,6 +24,7 @@ export async function requirePersonAccess(accountId: string, personId: string, m
   if (!row) throw notFound();
   if (RANK[row.role as Role] < RANK[minRole]) throw notFound();
   if (row.archivedAt !== null) throw notFound();
+  return row.role as Role;
 }
 
 /** 唯二检查点之二(审核 #001 #11):document 定位 → 同一核心。 */

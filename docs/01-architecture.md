@@ -11,19 +11,23 @@
                         │ HTTPS / REST (packages/contracts 定义)
 ┌───────────────────────▼──────────────────────────────────┐
 │  API 服务(厚)                                            │
-│  鉴权 · 归档管道 · 检索 · AI 编排 · 导出                    │
+│  鉴权 · 归档 · 人工事实 · 关键词检索 · 趋势 · 导出队列     │
 └──┬──────────────┬──────────────┬──────────────┬──────────┘
    │              │              │              │
 ┌──▼───────┐  ┌───▼────────┐  ┌──▼─────────┐  ┌─▼────────┐
-│ S3 兼容   │  │ PostgreSQL │  │ 检索引擎    │  │ AI 供应商 │
-│ 对象存储  │  │ 索引/元数据 │  │ 全文+语义   │  │ 视觉/ASR  │
-│ ★真相来源 │  │ (可重建)   │  │ (可重建)   │  │          │
+│ S3 兼容   │  │ PostgreSQL │  │ 关键词索引  │  │ export worker│
+│ 对象存储  │  │ 索引/队列   │  │ (可重建)   │  │ PDF/PNG    │
+│ ★L1 真相 │  │ (可重建)   │  │ 语义可选增强│  │ 确定性    │
 └──────────┘  └────────────┘  └────────────┘  └──────────┘
 ```
 
+可选 `plugin-main` worker 独立连接模型/ASR 供应商，只产生待确认 L2 建议；不部署它时 Core 保持完整。
+
 **★ 唯一的持久真相是 S3 中的原件与 sidecar JSON。** 数据库和检索索引都是可从 S3 完整重建的缓存。这一条决定了很多下游设计。
 
-**★ 三层插件架构([ADR-045](./adr.md#adr-045)):** L1 档案层(原件 + 拍摄事实 + 人工输入 —— 10–20 年不淘汰,可整体打包迁移)/ L2 数据处理层(提取、归一化 —— 持续完善,可整体重跑)/ L3 分析层(通用大模型起步,未来可切专业医学大模型)。L2/L3 是插件:**升级替换时 L1 零字节变动;打包 L1 不带走任何派生物。**"数据库可重建"的前提是人工输入随写随双写 journal,而不是等某个导出功能。对象归属的权威表见 [04 §1](./04-storage-layout.md#1-权威矩阵对象--层--可变性--锁--打包)。
+**★ 三层插件架构([ADR-045](./adr.md#adr-045)):** L1 档案层(原件 + 拍摄事实 + 人工输入 —— 10–20 年不淘汰,可整体打包迁移)/ L2 数据处理层(确定性索引/导出工件与可选 AI 建议 —— 可整体重建)/ L3 分析层(可选的后续分析，不属于 P0–P4 Core)。L2/L3 可替换:**升级或删除时 L1 零字节变动;打包 L1 不带走任何派生物。**"数据库可重建"的前提是人工输入随写随双写 journal,而不是等某个导出功能。对象归属的权威表见 [04 §1](./04-storage-layout.md#1-权威矩阵对象--层--可变性--锁--打包)。
+
+`PROCESSING_MODE=off` 是 Core 默认值。API 进程不加载 provider adapter；`plugin-main` 独立消费 processing job，可不部署。`export-main` 是 Core 确定性 worker，与 AI 插件无关。发布门禁分轨见 [ADR-051](./adr.md#adr-051--p0p4-core-与-ai-插件资格分轨)。
 
 ## 1b. AI 层的形态:多角色代理系统([ADR-044](./adr.md#adr-044))
 
@@ -71,7 +75,7 @@ AI 管线不是"一个大模型一把梭",而是**多个窄职责角色 + 确定
 
 两个约束把架构推向同一个方向:
 
-1. **AI 密钥绝不能进前端** → 所有 AI 调用必须在后端
+1. **AI 密钥绝不能进前端** → 所有 AI 调用只能在独立 plugin worker
 2. **未来要支持 App 和小程序** → 业务逻辑必须与 UI 解耦
 
 结论:**客户端只做采集与展示,所有逻辑在服务端**。换平台时只需重写一层壳。
@@ -125,7 +129,7 @@ account ──┐
 - 写入本地成功即视为"已存档",UI 立刻给正反馈
 - 队列状态必须可见,让用户敢离开医院
 - 大图走**预签名 URL 前端直传**,不过后端(省流量、省服务器)
-- 分片 + 断点续传(**M1 未实现**:整文件单 PUT + 整份重传;预签名 multipart 需三段式与服务端状态 → 设计债 D14,绑 M2)
+- 大于 8 MiB 时使用 multipart 与 IndexedDB ETag 断点续传；对象完成后服务端回流校验整文件 SHA-256
 - **队列推进由前台事件驱动**(ADR-046):iOS 无 Background Sync 且 SW 读不到 token,UI 必须如实告知
 
 ## 5. 检索
@@ -157,9 +161,9 @@ account ──┐
 ① 客户端拍照 + ★ 本地选人确认(1 次点击,离线可用)→ 写入 IndexedDB → 入队
 ② 请求预签名 URL → 直传原件到 S3(不可变区;key 由所选 person 决定)
 ③ 通知后端「已上传」→ 创建 document 记录(status=uploaded, person_confirmed=true)
-④ 后台任务:AI 读元数据(人/日期/机构/科室/类型)+ 全文
-⑤ 归人对账 —— AI 读到的姓名/证件号与所选人比对;不一致才置 person_mismatch 提醒用户裁决(ADR-041)
-⑥ capture.json(拍摄事实)在②直传时即已写入;AI 观点落 derived/meta.json + 建索引 + 缩略图(ADR-045)
+④ Core 立即提供人工元数据、关键词索引和缩略图，文档不等待 AI
+⑤ 可选 plugin worker 读取 L2 派生图生成元数据/OCR 建议并对账；不一致才提醒用户裁决(ADR-041)
+⑥ capture.json(拍摄事实)与人工修正属 L1；AI 建议落 L2，删除后不影响归档、检索、趋势或导出
 ```
 
 ### 提取(P2)
@@ -189,7 +193,9 @@ document ──> extraction(v1, model=X, prompt=Y)
 ## 8. 环境与配置
 
 ```
-AI_PROVIDER / AI_MODEL     # AI 提取提供方与模型
+PROCESSING_MODE            # off(默认 Core) / assist
+PROCESSING_PLUGIN_ID       # 可选 plugin worker 身份
+AI_PROVIDER / AI_MODEL     # 只供 plugin worker 使用
 ANTHROPIC_API_KEY          # Anthropic 提供方
 DEEPSEEK_API_KEY           # DeepSeek 提供方
 ASR_PROVIDER / ASR_API_KEY # 语音转写(见 06)
@@ -199,6 +205,7 @@ S3_ACCESS_KEY / S3_SECRET_KEY
 S3_REGION
 BACKUP_TARGET              # 第二处备份(rclone remote)
 JWT_SECRET
+EXPORT_WORKER_CONCURRENCY  # Core 确定性导出 worker
 ```
 
 所有密钥仅存在于服务端。前端永远拿不到任何一个。

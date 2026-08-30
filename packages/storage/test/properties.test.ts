@@ -93,6 +93,20 @@ describe('key 往返(spec m0-03 §2,≥1000 例)', () => {
     expect(() => buildKey.page({ personSlug: 'p3f7a2', captureDate: '2026-08-17', docShortId: 'd7k2m9', pageNo: 100, ext: 'jpg' })).toThrow();
     expect(() => parseKey('people/p3f7a2/2025/2026-08-17__d7k2m9/capture.json')).toThrow();
   });
+
+  it('context 媒体与 sidecar key 往返且保留完整归属身份', () => {
+    const identity = {
+      personSlug: 'p3f7a2',
+      sessionId: '018f0000-0000-7000-8000-000000000001',
+      questionKey: 'doctor_advice',
+      uploadId: '018f0000-0000-7000-8000-000000000002',
+    };
+    const media = buildKey.contextMedia({ ...identity, ext: 'm4a' });
+    expect(parseKey(media)).toEqual({ kind: 'contextMedia', ...identity, ext: 'm4a' });
+    const sidecar = buildKey.contextMediaMeta(identity);
+    expect(parseKey(sidecar)).toEqual({ kind: 'contextMediaMeta', ...identity });
+    expect(() => parseKey(media.replace('doctor_advice', '../doctor_advice'))).toThrow();
+  });
 });
 
 describe('canonical(spec m0-03 §4)', () => {

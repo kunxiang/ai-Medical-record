@@ -4,7 +4,17 @@ function req(name: string): string {
   return v;
 }
 
+const processingMode = (() => {
+  const value = process.env.PROCESSING_MODE ?? 'off';
+  if (value !== 'off' && value !== 'assist') {
+    throw new Error('PROCESSING_MODE 必须为 off 或 assist,拒绝启动');
+  }
+  return value as 'off' | 'assist';
+})();
+
 export const env = {
+  /** 智能处理是可选插件；Core 缺省必须在完全关闭时可用。 */
+  processingMode,
   databaseUrl: process.env.DATABASE_URL ?? 'postgres://amr:amr@localhost:5433/amr',
   /** m2-04 §3.5:作业并发度,必须 ≥1 */
   aiJobConcurrency: Number(process.env.AI_JOB_CONCURRENCY ?? '2'),
@@ -29,6 +39,12 @@ export const env = {
   port: Number(process.env.PORT ?? 8300),
   // CORS 白名单(m1-02 §7.1)。禁止 '*':带 Authorization 的跨源请求需要精确 origin。
   webOrigins: (process.env.WEB_ORIGIN ?? 'http://localhost:5173').split(',').map((o) => o.trim()).filter(Boolean),
+  exports: {
+    maxOriginalBytes: Number(process.env.EXPORT_MAX_ORIGINAL_BYTES ?? String(50 * 1024 * 1024)),
+    maxOriginalPages: Number(process.env.EXPORT_MAX_ORIGINAL_PAGES ?? '100'),
+    workerConcurrency: Number(process.env.EXPORT_WORKER_CONCURRENCY ?? '1'),
+    leaseMs: Number(process.env.EXPORT_LEASE_MS ?? String(2 * 60_000)),
+  },
 };
 
 export const LOCK_RETENTION_YEARS = 10;

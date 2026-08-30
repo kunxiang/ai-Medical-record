@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, count, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
-  CaptureSidecar, DocumentCreate, DocumentOut, MAX_UPLOAD_BYTES, MIME_TO_EXT,
+  CaptureSidecar, DocumentCreate, DocumentDetailResponse, DocumentOut, Encounter,
+  MAX_UPLOAD_BYTES, MIME_TO_EXT,
   MULTIPART_THRESHOLD_BYTES,
   PageSidecar, PageUrlResponse, PresignRequest, PresignResponse, Uuid,
-  capturedAtInRange, dedupKey, idempotencyFingerprint,
+  capturedAtInRange, idempotencyFingerprint,
 } from '@amr/contracts';
 
 type Mime = keyof typeof MIME_TO_EXT;
@@ -14,15 +15,18 @@ import {
   buildKey, canonicalJson, captureDateInZone, newDocShortId, serverTimestamp,
 } from '@amr/storage';
 import { requireDocumentAccess, requirePersonAccess } from '../access.js';
-import { db, type Tx } from '../db/client.js';
+import { db } from '../db/client.js';
 import {
-  account, document, documentPage, person, uploadBatch, uploadFile,
+  account, contextSession, document, documentManualMetadata, documentPage, encounter, facility,
+  observation, person, searchEntry, uploadBatch, uploadFile,
 } from '../db/schema.js';
 import { defineRoute } from '../define-route.js';
-import { enqueue } from '../jobs/queue.js';
 import { ApiError, notFound } from '../errors.js';
 import { appendManifest } from '../journal.js';
 import { newId } from '../person-service.js';
+import { scheduleDocumentMetadata } from '../processing/scheduling.js';
+import { effectiveMetadata } from '../services/metadata.js';
+import { listDocumentMetadataSuggestions } from '../services/suggestions.js';
 import {
   copyWithLock, deleteObjectIfPossible, getObjectBytes, getObjectText, headObject, presignGet,
   presignPut, putWorm,
@@ -282,16 +286,27 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
           // 指纹的每个输入都在 capture.json 里 ⇒ 删库重建可原样重算(rebuild-index)。
           columnSet: { idem_fingerprint: fingerprint },
         });
-        // ★ 与登记**同事务**投递 S1 作业(m2-04 §4.1):
-        //   分开事务的话,"文档已登记但作业没投递"会静默漏跑,而这种漏跑没有任何信号。
-        await enqueue(tx, { kind: 'stage1', dedupKey: dedupKey.stage1(documentId), documentId, personId: input.person_id });
         await tx.insert(documentPage).values(
           staged.map((s) => ({
             id: newId(), documentId, pageNo: s.pageNo, storageKey: s.finalKey,
             contentSha256: s.sha256, byteSize: s.byteSize, mimeType: s.mime,
             width: s.width, height: s.height, captureOrder: s.captureOrder,
+            originCaptureDocumentId: documentId, originCaptureOrder: s.captureOrder,
+            originObjectSha256: s.sha256,
           })),
         );
+        await tx.insert(searchEntry).values({
+          id: documentId,
+          personId: input.person_id,
+          entityType: 'document',
+          entityId: documentId,
+          documentId,
+          occurredOn: captureDate,
+          sortAt: new Date(input.captured_at),
+          title: firstFile.filename || '医疗记录',
+          coreBody: firstFile.filename,
+          sourceRevisionHash: createHash('sha256').update(canonicalJson(capture)).digest('hex'),
+        });
         await tx
           .update(uploadBatch)
           .set({ consumedByDocumentId: documentId })
@@ -303,6 +318,13 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
         });
       });
       crashPoint('after-commit');
+
+      // Core 登记已经独立提交。辅助调度 best-effort，失败由周期 backfill 恢复，绝不回滚文档。
+      try {
+        await scheduleDocumentMetadata(documentId);
+      } catch (error) {
+        app.log.warn({ documentId, error }, '智能辅助调度失败，将由 backfill 重试');
+      }
 
       // 7. 删除临时对象(在 COMMIT 后,审核 #001 #5)
       for (const s of staged) await deleteObjectIfPossible(s.incomingKey);
@@ -316,10 +338,11 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
     method: 'GET',
     url: '/api/v1/documents/:id',
     input: z.object({ id: Uuid }),
-    output: DocumentOut,
-    handler: async ({ input, accountId }) => {
+    output: DocumentDetailResponse,
+    handler: async ({ input, accountId, reply }) => {
       await requireDocumentAccess(accountId, input.id, 'viewer');
-      return loadDocumentOut(input.id);
+      reply.header('cache-control', 'private, no-store');
+      return loadDocumentDetail(input.id);
     },
   });
 
@@ -328,7 +351,7 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
     url: '/api/v1/documents/:id/pages/:n/url',
     input: z.object({ id: Uuid, n: z.coerce.number().int().min(1) }),
     output: PageUrlResponse,
-    handler: async ({ input, accountId }) => {
+    handler: async ({ input, accountId, reply }) => {
       await requireDocumentAccess(accountId, input.id, 'viewer');
       const rows = await db
         .select()
@@ -336,6 +359,7 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
         .where(and(eq(documentPage.documentId, input.id), eq(documentPage.pageNo, input.n)))
         .limit(1);
       if (!rows[0]) throw notFound();
+      reply.header('cache-control', 'private, no-store');
       return {
         url: await presignGet(rows[0].storageKey),
         expires_at: new Date(Date.now() + 300_000).toISOString(),
@@ -375,4 +399,103 @@ async function loadDocumentOut(documentId: string) {
       })),
     created_at: d.createdAt.toISOString(),
   };
+}
+
+async function loadDocumentDetail(documentId: string) {
+  const d = (await db.select().from(document).where(eq(document.id, documentId)).limit(1))[0];
+  if (!d) throw notFound();
+  const manual = (await db.select().from(documentManualMetadata)
+    .where(eq(documentManualMetadata.documentId, documentId)).limit(1))[0] ?? null;
+  const provenance = (manual?.fieldProvenance ?? {}) as Record<string, {
+    source: 'manual' | 'accepted_suggestion'; event_id: string; suggestion_id?: string | null;
+  }>;
+  const facilityRow = manual?.facilityId
+    ? (await db.select({ name: facility.name }).from(facility)
+        .where(eq(facility.id, manual.facilityId)).limit(1))[0] ?? null
+    : null;
+  const effective = effectiveMetadata({
+    manual: manual ? {
+      docType: manual.docType,
+      sampledOn: manual.sampledOn,
+      reportedOn: manual.reportedOn,
+      facilityName: manual.facilityId ? facilityRow?.name ?? manual.facilityNameRaw : manual.facilityNameRaw,
+      department: manual.department,
+      title: manual.title,
+      note: manual.note,
+      provenance,
+    } : null,
+    fallback: { facilityName: null, title: d.originalFilename },
+  });
+  const pages = await db.select().from(documentPage)
+    .where(eq(documentPage.documentId, documentId)).orderBy(documentPage.pageNo);
+  const pageOutputs = await Promise.all(pages.map(async (page) => ({
+    page_no: page.pageNo,
+    storage_key: page.storageKey,
+    sha256: page.contentSha256,
+    origin_capture_document_id: page.originCaptureDocumentId,
+    origin_capture_order: page.originCaptureOrder,
+    origin_object_sha256: page.originObjectSha256,
+    byte_size: page.byteSize,
+    mime_type: page.mimeType,
+    width: page.width,
+    height: page.height,
+    original_url: await presignGet(page.storageKey),
+    original_url_expires_at: new Date(Date.now() + 300_000).toISOString(),
+    preview_kind: page.mimeType === 'application/pdf' ? 'pdf_browser' as const : 'image' as const,
+    preview_endpoint: page.mimeType === 'application/pdf'
+      ? null : `/api/v1/documents/${documentId}/pages/${page.pageNo}/preview`,
+  })));
+  const linkedEncounter = d.encounterId
+    ? (await db.select().from(encounter).where(eq(encounter.id, d.encounterId)).limit(1))[0] ?? null
+    : null;
+  const suggestions = await listDocumentMetadataSuggestions(documentId);
+  const contextCount = (await db.select({ value: count() }).from(contextSession)
+    .where(eq(contextSession.documentId, documentId)))[0]?.value ?? 0;
+  const observationCount = (await db.select({ value: count() }).from(observation)
+    .where(and(eq(observation.documentId, documentId), isNull(observation.archivedAt))))[0]?.value ?? 0;
+  return DocumentDetailResponse.parse({
+    archived_at: d.archivedAt?.toISOString() ?? null,
+    id: d.id,
+    short_id: d.shortId,
+    person_id: d.personId,
+    client_document_id: d.clientDocumentId,
+    status: d.status,
+    doc_type: effective.doc_type.value ?? 'unknown',
+    source: d.source,
+    captured_at: d.capturedAt.toISOString(),
+    capture_date: d.captureDate,
+    original_filename: d.originalFilename,
+    pages: pageOutputs,
+    created_at: d.createdAt.toISOString(),
+    effective_metadata: effective,
+    metadata_revision: manual?.revision ?? 0,
+    dates: {
+      sampled_on: effective.sampled_on.value,
+      reported_on: effective.reported_on.value,
+      encounter_on: linkedEncounter?.occurredOn ?? null,
+      captured_on: d.captureDate,
+    },
+    encounters: linkedEncounter ? [Encounter.parse({
+      id: linkedEncounter.id,
+      person_id: linkedEncounter.personId,
+      encounter_type: linkedEncounter.encounterType,
+      facility_id: linkedEncounter.facilityId,
+      department: linkedEncounter.department,
+      occurred_on: linkedEncounter.occurredOn,
+      ended_on: linkedEncounter.endedOn,
+      occurred_at: linkedEncounter.occurredAt?.toISOString() ?? null,
+      chief_complaint: linkedEncounter.chiefComplaint,
+      diagnosis_text: linkedEncounter.diagnosisText,
+      doctor_advice: linkedEncounter.doctorAdvice,
+      revision: linkedEncounter.revision,
+      updated_by: linkedEncounter.updatedBy,
+      updated_at: linkedEncounter.updatedAt.toISOString(),
+      archived_at: linkedEncounter.archivedAt?.toISOString() ?? null,
+      created_at: linkedEncounter.createdAt.toISOString(),
+    })] : [],
+    suggestions: suggestions.suggestions,
+    context_summary: { sessions: contextCount },
+    observation_count: observationCount,
+    medication_count: 0,
+  });
 }

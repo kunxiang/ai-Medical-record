@@ -7,6 +7,9 @@ export const ERROR_CODES = {
   unauthenticated: 401,
   not_found: 404,
   email_already_registered: 409,
+  operation_conflict: 409,
+  revision_conflict: 409,
+  export_artifact_missing: 409,
   duplicate_client_document_id: 409,
   sha256_mismatch: 409,
   upload_consumed: 409,
@@ -15,7 +18,11 @@ export const ERROR_CODES = {
   unsupported_media_type: 422,
   derivative_generation_failed: 422,
   upload_incomplete: 422,
+  export_too_large: 422,
+  export_has_no_confirmed_data: 422,
   rate_limited: 429,
+  share_rate_limited: 429,
+  capability_unavailable: 503,
   internal_error: 500,
 } as const;
 

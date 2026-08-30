@@ -13,6 +13,14 @@ export * from './jobs.js';
 export * from './normalization.js';
 export * from './multipart.js';
 export * from './corrections.js';
+export * from './processing.js';
+export * from './metadata.js';
+export * from './search.js';
+export * from './exports.js';
+export * from './context.js';
+export * from './observation.js';
+export * from './trends.js';
+export * from './medication.js';
 
 export const SCHEMA_VERSIONS = {
   capture: '2.0',

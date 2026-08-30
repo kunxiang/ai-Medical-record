@@ -2,6 +2,9 @@ import { z } from 'zod';
 import { Uuid, IsoDate, IsoDateTime, DocShortId, Sha256Hex } from './scalars.js';
 import { DocumentSource, DocumentStatus, DocType, MimeType, PersonCheck } from './enums.js';
 import { canonicalJsonString } from './canonical.js';
+import { EffectiveDocumentMetadata } from './metadata.js';
+import { MetadataSuggestion } from './metadata.js';
+import { Encounter } from './encounter.js';
 
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 export const MAX_PAGES = 99;
@@ -105,6 +108,34 @@ export const DocumentOut = z.object({
   created_at: IsoDateTime,
 });
 
+export const DocumentDetailPage = DocumentPageOut.extend({
+  origin_capture_document_id: Uuid,
+  origin_capture_order: z.number().int().min(1),
+  origin_object_sha256: Sha256Hex,
+  original_url: z.string().url(),
+  original_url_expires_at: IsoDateTime,
+  preview_kind: z.enum(['image', 'pdf_browser']),
+  preview_endpoint: z.string().nullable(),
+}).strict();
+
+export const DocumentDetailResponse = DocumentOut.extend({
+  client_document_id: z.string().min(8).max(64),
+  pages: z.array(DocumentDetailPage),
+  effective_metadata: EffectiveDocumentMetadata,
+  metadata_revision: z.number().int().min(0),
+  dates: z.object({
+    sampled_on: IsoDate.nullable(),
+    reported_on: IsoDate.nullable(),
+    encounter_on: IsoDate.nullable(),
+    captured_on: IsoDate,
+  }).strict(),
+  encounters: z.array(Encounter),
+  suggestions: z.array(MetadataSuggestion),
+  context_summary: z.object({ sessions: z.number().int().min(0) }).strict(),
+  observation_count: z.number().int().min(0),
+  medication_count: z.number().int().min(0),
+}).strict();
+
 export const PageUrlResponse = z.object({ url: z.string().url(), expires_at: IsoDateTime });
 
 // ── 幂等指纹(m0/CHANGES #4 · m1-01 §A3)────────────────────────────────
@@ -127,7 +158,12 @@ export function idempotencyFingerprint(input: z.infer<typeof DocumentCreate>): s
 }
 
 // ── M1:文档列表 ────────────────────────────────────────────────────────
-export const DateField = z.enum(['capture_date', 'sampled_on', 'reported_on']);
+export const DateField = z.enum(['best_available', 'sampled', 'reported', 'encounter', 'capture']);
+const QueryBoolean = z.union([
+  z.boolean(),
+  z.literal('true').transform(() => true),
+  z.literal('false').transform(() => false),
+]);
 
 export const DocumentListQuery = z.object({
   person_id: Uuid,
@@ -135,15 +171,20 @@ export const DocumentListQuery = z.object({
   to: IsoDate.optional(),
   // m2-01 §3.2:from/to 的语义由固定 capture_date 改为按 date_field 选择(D15 清偿项)。
   // ★ 边界规则(m2-99 A31):所选列为 NULL 的文档**一律不入选**,无论 from/to 如何。
-  date_field: DateField.default('capture_date'),
+  date_field: DateField.default('best_available'),
+  encounter_id: Uuid.optional(),
   doc_type: DocType.optional(),
   facility_id: Uuid.optional(),
+  department: z.string().trim().max(200).optional(),
+  q: z.string().trim().min(1).max(100).optional(),
   person_check: PersonCheck.optional(),
-  acked: z.coerce.boolean().optional(),      // 与 person_check 组合:未 ack 的告警
-  include_archived: z.coerce.boolean().default(false),
-  cursor: z.string().max(128).optional(),
-  limit: z.coerce.number().int().min(1).max(100).default(50),
-});
+  acked: QueryBoolean.optional(),      // 与 person_check 组合:未 ack 的告警
+  include_archived: QueryBoolean.default(false),
+  // JSON + base64url 的四元排序键在 UUID/ISO 正常输入下会超过 128 字符。
+  // 与其他 P0 稳定游标保持同一上限，避免服务端生成自己拒绝的游标。
+  cursor: z.string().max(512).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+}).strict();
 
 export const DocumentListItem = z.object({
   id: Uuid, short_id: DocShortId, person_id: Uuid,
@@ -160,12 +201,29 @@ export const DocumentListItem = z.object({
   person_check: PersonCheck,
   person_check_ack_at: IsoDateTime.nullable(),
   archived_at: IsoDateTime.nullable(),
-});
+  // P0 manual-first 增量；保留上面的扁平字段供旧 Web 渐进迁移。
+  encounter_id: Uuid.nullable(),
+  effective_metadata: EffectiveDocumentMetadata,
+  dates: z.object({
+    sampled_on: IsoDate.nullable(),
+    reported_on: IsoDate.nullable(),
+    latest_encounter_on: IsoDate.nullable(),
+    captured_on: IsoDate,
+    selected_date: IsoDate.nullable(),
+    selected_date_field: DateField,
+  }).strict(),
+  revision: z.number().int().min(0),
+  assist_suggestion_count: z.number().int().min(0),
+}).strict();
 
 export const DocumentListResponse = z.object({
   documents: z.array(DocumentListItem),
   next_cursor: z.string().nullable(),
 });
+
+export type DocumentDetailResponseT = z.infer<typeof DocumentDetailResponse>;
+export type DocumentListQueryT = z.infer<typeof DocumentListQuery>;
+export type DateFieldT = z.infer<typeof DateField>;
 
 // base64url:纯实现,浏览器与 Node 均可用(contracts 被 PWA 引用,禁止依赖 Buffer)
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
@@ -199,6 +257,26 @@ export function decodeCursor(cursor: string): { capturedAt: string; documentId: 
   const i = raw.lastIndexOf('|');
   if (i < 0) throw new Error('bad cursor');
   return { capturedAt: raw.slice(0, i), documentId: raw.slice(i + 1) };
+}
+
+export interface DocumentCursorValue {
+  selectedDate: string | null;
+  capturedAt: string;
+  documentId: string;
+  dateField: z.infer<typeof DateField>;
+}
+
+export function encodeDocumentCursor(value: DocumentCursorValue): string {
+  return toB64Url(new TextEncoder().encode(canonicalJsonString(value)));
+}
+
+export function decodeDocumentCursor(cursor: string): DocumentCursorValue {
+  const parsed = JSON.parse(new TextDecoder().decode(fromB64Url(cursor))) as unknown;
+  const schema = z.object({
+    selectedDate: IsoDate.nullable(), capturedAt: IsoDateTime,
+    documentId: Uuid, dateField: DateField,
+  }).strict();
+  return schema.parse(parsed);
 }
 
 // ── M1:放弃采集 ────────────────────────────────────────────────────────

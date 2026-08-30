@@ -3,12 +3,14 @@ title: "M2 实现状态与恢复锚点"
 kind: runtime
 status: active
 task: "m2-ai-metadata-and-reconciliation"
-updated_on: 2026-08-27
+updated_on: 2026-08-28
 source_commit: "29f2fe84daf4c9b9e2db01ff054ae0fcb672e970"
 owners: ["ai-medical-record"]
 ---
 
 # M2 实现状态与恢复锚点
+
+> M2 现为独立 AI plugin qualification 轨，不阻塞 P0–P4 Core。功能主线恢复入口是 [`specs/p0-p4-core/CLAUDE.md`](../../specs/p0-p4-core/CLAUDE.md)；本页只用于续接 M2 provider/wire/质量基线工作。
 
 ## 恢复入口
 
@@ -46,7 +48,7 @@ owners: ["ai-medical-record"]
 ## 明确未实现
 
 - A 组当前有 18/42 个候选场景自动化：A1–A8、A9b、A10–A12、A15–A17、A33–A35；B 组按 CHANGES #14 为 15/15。4 个模型盒均为 synthetic，真实 wire cassette 未完成前第一批不计正式验收。逐项缺口见 `specs/m2/ACCEPTANCE-COVERAGE.md`。
-- C 组至少 20 份脱敏真实单据、质量回归集和 C1–C9 基线；项目所有者于 2026-08-27 确认延期收集，该项不阻塞 A/B 工程推进，但仍阻塞 M2 最终关闭。
+- C 组至少 20 份脱敏真实单据、质量回归集和 C1–C9 基线；项目所有者于 2026-08-27 确认延期收集。该项只阻塞 M2/plugin 最终关闭，不阻塞 Core P0–P4。
 
 ## 当前下一步
 

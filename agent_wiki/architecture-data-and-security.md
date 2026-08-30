@@ -3,7 +3,7 @@ title: "架构、数据分层与安全边界"
 kind: engineering
 status: active
 scope: repository
-verified_on: 2026-08-26
+verified_on: 2026-08-28
 owners: ["ai-medical-record"]
 sources:
   - "docs/01-architecture.md"
@@ -21,10 +21,11 @@ sources:
 项目是 pnpm workspace TypeScript monorepo：
 
 - `apps/web`：React/Vite PWA，负责采集、展示和 IndexedDB 离线队列。
-- `apps/api`：Fastify 长驻 API，负责鉴权、归档、派生物生成和 AI 作业编排。
+- `apps/api`：Fastify 长驻 API，负责鉴权、归档、人工事实、关键词检索和导出队列；`export-main` 是确定性 Core worker，`plugin-main` 是可选 AI worker。
 - `packages/contracts`：跨端 Zod/API 契约和事件 schema 的唯一来源。
 - `packages/storage`：S3 key、sidecar 和规范化序列化。
 - `packages/ai`：模型调用、版本化 prompt、Stage 1 输出与合并规则。
+- `packages/medical`：本地 concept catalog、单位/比较符解析、RCV 和确定性派生。
 - `tools`：部署、验收、存储探针和重建工具。
 
 依赖方向是 `apps/* → packages/*`；`packages/*` 禁止反向依赖应用，Web 与 API 只通过 contracts 通信。实际目录优先于早期设计文档中的规划目录。
@@ -34,8 +35,8 @@ sources:
 | 层 | 内容 | 可变性与恢复 |
 |---|---|---|
 | L1 档案层 | 原件、拍摄事实、人工输入、journal、manifest | 既有对象字节不可修改；人工判断随写随双写；必须可独立迁移和重建 |
-| L2 数据处理层 | 派生图片、AI 工件、AI job、可重算元数据 | 可整体删除和重跑；不得反向修改 L1 |
-| L3 分析层 | 后续分析与模型能力 | 可替换；当前 M2 不实现医学分析 |
+| L2 数据处理层 | 派生图片、search projection、确定性派生/导出 artifact、可选 AI job/suggestion | 可整体删除和重建；不得反向修改 L1 |
+| L3 分析层 | 可选的后续分析与模型能力 | 可替换；不属于 P0–P4 Core |
 
 持久真相是对象存储中的 L1 原件与 sidecar。PostgreSQL 是可重建索引；“可重建”成立的前提是每一项人工判断都进入 L1，而不是只留在数据库。
 
@@ -44,7 +45,7 @@ sources:
 1. 原件字节零改动；派生物只能写入 `derived/`。
 2. AI 读取 L2 派生物，不读取或改写 L1 原件。
 3. AI 输出可重跑，人工判断不可因重跑被覆盖。
-4. M2 禁止 Stage 2、医学判断、检索、趋势和导出。
+4. P0–P4 Core 在 `PROCESSING_MODE=off` 下必须完整可用；M2/AI 只是可选插件资格轨，不得阻塞 Core 发布。
 5. 归人由用户在采集端确认；AI 只做事后对账，禁止自动修改 `document.person_id`。
 6. 新对象类型必须先进入存储权威矩阵；新 journal 事件必须同步 schema、registry 和 `_meta/README.md`。
 7. 归一化的语义判断可以由 AI 完成，但执行必须是确定性代码并保留决策依据。
@@ -62,6 +63,7 @@ sources:
 
 - Web 是静态 PWA，可部署到 Vercel 等静态平台，但必须使用 HTTPS。
 - API 必须运行在长驻容器：worker 依赖定时轮询，Stage 1 可能长时间运行，并使用 PostgreSQL 长连接和 Sharp。
+- Core 需独立长驻 `export-main`；只有 assist 部署才需要 `plugin-main`。API 进程不加载 provider adapter。
 - PostgreSQL 要求 16+；对象存储必须支持预签名 PUT、CORS、`If-None-Match` 与 `If-Match` 条件写。
 - `WEB_ORIGIN` 必须是精确白名单，禁止 `*`。
 - R2 当前不提供对象版本化和逐对象保留锁；投入生产 L1 前必须落实 ADR-048 补偿措施。
@@ -70,6 +72,7 @@ sources:
 
 - 类型与单测：`pnpm typecheck`、`pnpm test`
 - M1 自动验收：`pnpm m1:acceptance`
+- P0–P4 无 AI 总验收：`pnpm core:acceptance`
 - 部署冒烟：`pnpm --filter @amr/tools deploy-smoke`
 - 存储能力探针：`pnpm --filter @amr/tools probe-storage`
 

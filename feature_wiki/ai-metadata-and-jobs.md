@@ -38,12 +38,14 @@ sources:
 
 该能力处于 M2 rollout，不是完整 M2 发布说明。
 
+它是可选 processing plugin，不是 P0–P4 Core 的前置依赖。Core 默认 `PROCESSING_MODE=off`；未部署 plugin worker 时归档、情境、人工结构化、关键词检索、趋势和导出仍完整可用。
+
 ## Scope
 
 - 已实现：Stage 1 图片路径、版本化 prompt、job 状态机、归人确定性对账、机构归一、二文档就诊归组建议，以及对应的人工确认/拒绝、归人纠正、软归档与文档边界后端接口。
 - 已实现：人工 archive/ack/facility+encounter normalization 可仅凭 L1 删库重建；回放不读取 AI 工件、不投递 job、不写回 journal。
 - 未实现：文档边界可视化操作 UI、A 组剩余 24 项跨层验收、真实 wire cassette 和 C 组真实单据质量基线。当前 18/42 个 A 场景已自动化、B 组 15/15；弱网大文件 multipart 已在采集链源码实现，发布与 owner 验收状态见采集功能页。
-- 明确不做：Stage 2 化验值提取、单位换算、医学判断、检索、趋势和导出。
+- 插件边界：当前 M2 plugin 不负责 Stage 2 质量、单位换算、医学判断或 Core 导出；相应的手工/确定性 Core 实现见独立功能页。
 
 ## API / Behavior
 
@@ -73,7 +75,7 @@ sources:
 
 ## Operation Guide
 
-1. 确认 API 进程配置 `AI_PROVIDER` 及对应密钥（`ANTHROPIC_API_KEY` 或 `DEEPSEEK_API_KEY`），并保持 `AI_JOB_WORKER` 开启。
+1. Core API 保持 provider-neutral；只在需要 assist 时启动独立 `plugin-main`，为它配置 `PROCESSING_MODE=assist`、`AI_PROVIDER` 及对应密钥。
 2. 正常登记图片或 PDF 文档；系统自动创建 Stage 1 job。
 3. 使用 `/api/v1/jobs` 或 `/api/v1/documents/:id/ai` 查看状态和失败原因。
 4. 仅在确认需要重跑时调用 rerun 端点。
@@ -96,7 +98,7 @@ sources:
 
 - 边界操作目前没有前端入口，需通过受鉴权 API 调用；误操作只能通过新的人工纠正操作表达，不能改写 L1。
 - 旧版 encounter decision 若不含 facility 快照，只恢复决策行并进入对账；不能自动猜测外键。新确认记录可完整恢复 encounter 与 `grouping_basis`。
-- 未配置 AI key 时，采集和浏览仍可用；AI job 失败并保留可见状态。
+- `PROCESSING_MODE=off` 时 API 不创建 processing job，Web 隐藏辅助入口，不显示错误横幅；Core 功能不降级。
 - PDF 超限或损坏只终止 AI 处理，不删除 L1 原件。
 - AI 结果属于可重建层；任何人工处理在 journal/replay 完成前都不能被视为完整交付。
 
@@ -108,3 +110,4 @@ sources:
 - 2026-08-26：机构归一、就诊归组建议、人工审核、归人纠正与软归档进入实现完成/待运行验收状态。
 - 2026-08-26：正常 PDF document-block、内部页序校验和 32 MiB/600 页门禁实现完成。
 - 2026-08-27：人工层回放与第一批 candidate harness 落地；18/42 个 A 场景自动化、B=15/15。独立审查发现 4 个盒是 synthetic stub，已显式标记 provenance 并撤回第一批验收声明；M2 仍待真实 wire cassette、其余 A 项与延期 C 组基线。
+- 2026-08-28：依 ADR-051 将 M2 收敛为独立 plugin qualification；20 份真实脱敏单据延后不阻塞 Core P0–P4。

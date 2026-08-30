@@ -3,6 +3,7 @@ import {
   DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command,
   PutObjectCommand, S3Client, S3ServiceException, UploadPartCommand,
 } from '@aws-sdk/client-s3';
+import type { Readable } from 'node:stream';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { env, LOCK_RETENTION_YEARS, PROBE_RETENTION_MS } from './env.js';
 import { buildKey } from '@amr/storage';
@@ -88,6 +89,16 @@ export async function getObjectText(key: string): Promise<{ text: string; etag: 
   } catch (e) {
     if (isStatus(e, 404)) return null;
     throw e;
+  }
+}
+
+export async function getObjectStream(key: string): Promise<Readable | null> {
+  try {
+    const response = await s3.send(new GetObjectCommand({ Bucket: B, Key: key }));
+    return response.Body as Readable;
+  } catch (error) {
+    if (isStatus(error, 404)) return null;
+    throw error;
   }
 }
 

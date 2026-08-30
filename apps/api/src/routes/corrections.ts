@@ -6,19 +6,21 @@ import {
   CorrectionPersonReassign, CorrectionResponse, CorrectionSidecar, MergeRequest,
   MovePageRequest, PersonCheckAckRequest, PersonCheckAckResponse, ReassignRequest,
   S1Artifact, SplitRequest, Uuid,
-  canonicalJsonString, dedupKey,
+  canonicalJsonString,
 } from '@amr/contracts';
 import {
   buildKey, canonicalJson, newDocShortId, parseKey, serverTimestamp,
 } from '@amr/storage';
 import { requireDocumentAccess, requirePersonAccess } from '../access.js';
 import { db, type Tx } from '../db/client.js';
-import { aiJob, document, documentPage, humanOperation, person } from '../db/schema.js';
+import {
+  aiJob, document, documentPage, humanOperation, person, processingJob, processingSuggestion,
+} from '../db/schema.js';
 import { planMerge, planMovePage, planSplit, type PageMovePlan } from '../document-boundaries.js';
 import { defineRoute } from '../define-route.js';
 import { ApiError, notFound } from '../errors.js';
 import { appendAudit, appendJournal, appendManifest } from '../journal.js';
-import { enqueue } from '../jobs/queue.js';
+import { scheduleDocumentMetadata } from '../processing/scheduling.js';
 import { deletePrefix, getObjectText, listKeys, putWorm } from '../s3.js';
 
 interface DocumentContext {
@@ -245,17 +247,23 @@ async function applyMoves(
   return { sourceCount, targetCount };
 }
 
-async function requeueStage1(tx: Tx, documentId: string, personId: string): Promise<void> {
-  const reset = await tx.update(aiJob).set({
-    state: sql`case when ${aiJob.state} = 'running' then 'running' else 'pending' end`,
-    attempt: 0, nextAttemptAt: sql`now()`, personId,
-    lastError: null, updatedAt: sql`now()`,
-  }).where(and(eq(aiJob.documentId, documentId), eq(aiJob.kind, 'stage1')))
-    .returning({ id: aiJob.id });
-  if (reset.length === 0) {
-    await enqueue(tx, {
-      kind: 'stage1', dedupKey: dedupKey.stage1(documentId), documentId, personId,
-    });
+async function dropDocumentProcessing(tx: Tx, documentId: string): Promise<void> {
+  await tx.delete(aiJob).where(and(eq(aiJob.documentId, documentId), eq(aiJob.kind, 'stage1')));
+  await tx.delete(processingJob).where(and(
+    eq(processingJob.subjectType, 'document'), eq(processingJob.subjectId, documentId),
+  ));
+  await tx.delete(processingSuggestion).where(and(
+    eq(processingSuggestion.subjectType, 'document'), eq(processingSuggestion.subjectId, documentId),
+  ));
+}
+
+async function scheduleCorrectedDocuments(app: FastifyInstance, documentIds: string[]): Promise<void> {
+  for (const documentId of documentIds) {
+    try {
+      await scheduleDocumentMetadata(documentId);
+    } catch (error) {
+      app.log.warn({ documentId, error }, '边界纠正后的辅助调度失败，将由 backfill 重试');
+    }
   }
 }
 
@@ -379,7 +387,7 @@ export function registerCorrectionRoutes(app: FastifyInstance): void {
     handler: async ({ input, accountId }) => {
       await requireDocumentAccess(accountId, input.id, 'editor');
       await requirePersonAccess(accountId, input.to_person_id, 'editor');
-      return db.transaction(async (tx) => {
+      const result = await db.transaction(async (tx) => {
         const current = await lockedDocument(tx, input.id);
         const request = {
           to_person_id: input.to_person_id, reason: input.reason,
@@ -409,19 +417,7 @@ export function registerCorrectionRoutes(app: FastifyInstance): void {
           personId: input.to_person_id, personCheckAckAt: new Date(at),
           encounterId: null, s1ArtifactKey: null, s1PromptVersion: null,
         }).where(eq(document.id, input.id));
-        const reset = await tx.update(aiJob).set({
-          state: sql`case when ${aiJob.state} = 'running' then 'running' else 'pending' end`,
-          attempt: 0, nextAttemptAt: sql`now()`,
-          personId: input.to_person_id,
-          lastError: null, updatedAt: sql`now()`,
-        }).where(and(eq(aiJob.documentId, input.id), eq(aiJob.kind, 'stage1')))
-          .returning({ id: aiJob.id });
-        if (reset.length === 0) {
-          await enqueue(tx, {
-            kind: 'stage1', dedupKey: dedupKey.stage1(input.id),
-            documentId: input.id, personId: input.to_person_id,
-          });
-        }
+        await dropDocumentProcessing(tx, input.id);
         await appendManifest(tx, {
           schema_version: '1.0', op: 'person_correct', event_id: input.client_operation_id,
           doc_short_id: current.shortId, to_person_slug: target.slug, created_at: at,
@@ -440,6 +436,8 @@ export function registerCorrectionRoutes(app: FastifyInstance): void {
         });
         return result;
       });
+      await scheduleCorrectedDocuments(app, [input.id]);
+      return result;
     },
   });
 
@@ -450,7 +448,7 @@ export function registerCorrectionRoutes(app: FastifyInstance): void {
     output: CorrectionResponse,
     handler: async ({ input, accountId }) => {
       await requireDocumentAccess(accountId, input.id, 'editor');
-      return db.transaction(async (tx) => {
+      const result = await db.transaction(async (tx) => {
         const source = await lockedDocument(tx, input.id);
         const request = {
           at_page_no: input.at_page_no, client_operation_id: input.client_operation_id,
@@ -526,8 +524,7 @@ export function registerCorrectionRoutes(app: FastifyInstance): void {
         }).where(eq(document.id, source.id));
         await tx.update(document).set({ pageCount: counts.targetCount })
           .where(eq(document.id, newDocumentId));
-        await requeueStage1(tx, source.id, source.personId);
-        await requeueStage1(tx, newDocumentId, source.personId);
+        await dropDocumentProcessing(tx, source.id);
         await appendManifest(tx, {
           schema_version: '1.0', op: 'add', event_id: input.client_operation_id,
           doc_short_id: newShortId, person_slug: source.personSlug,
@@ -550,6 +547,8 @@ export function registerCorrectionRoutes(app: FastifyInstance): void {
         });
         return result;
       });
+      await scheduleCorrectedDocuments(app, [result.document_id, result.new_document_id!]);
+      return result;
     },
   });
 
@@ -564,7 +563,7 @@ export function registerCorrectionRoutes(app: FastifyInstance): void {
       }
       await requireDocumentAccess(accountId, input.id, 'editor');
       await requireDocumentAccess(accountId, input.absorb_document_id, 'editor');
-      return db.transaction(async (tx) => {
+      const result = await db.transaction(async (tx) => {
         const [target, source] = await lockedDocumentPair(tx, input.id, input.absorb_document_id);
         const request = {
           absorb_document_id: input.absorb_document_id,
@@ -597,10 +596,11 @@ export function registerCorrectionRoutes(app: FastifyInstance): void {
           pageCount: counts.targetCount, encounterId: null, status: 'ready',
           s1ArtifactKey: null, s1PromptVersion: null, personCheck: 'unknown',
         }).where(eq(document.id, target.id));
-        // 被吸收文档已经是 0 页归档记录。作业属于 L2，可直接删除；若 worker 正在处理，
+        // 被吸收文档已经是 0 页归档记录。处理任务/建议属于 L2，可直接删除；若 worker 正在处理，
         // 它随后按 job id 写终态会命中 0 行，不会把空文档重新激活。
         await tx.delete(aiJob).where(eq(aiJob.documentId, source.id));
-        await requeueStage1(tx, target.id, target.personId);
+        await dropDocumentProcessing(tx, source.id);
+        await dropDocumentProcessing(tx, target.id);
         await appendJournal(tx, target.personSlug, {
           schema_version: '1.0', event: 'document_merge',
           event_id: input.client_operation_id, at, by_account_id: accountId,
@@ -618,6 +618,8 @@ export function registerCorrectionRoutes(app: FastifyInstance): void {
         });
         return result;
       });
+      await scheduleCorrectedDocuments(app, [result.document_id]);
+      return result;
     },
   });
 
@@ -632,7 +634,7 @@ export function registerCorrectionRoutes(app: FastifyInstance): void {
       }
       await requireDocumentAccess(accountId, input.id, 'editor');
       await requireDocumentAccess(accountId, input.to_document_id, 'editor');
-      return db.transaction(async (tx) => {
+      const result = await db.transaction(async (tx) => {
         const [source, target] = await lockedDocumentPair(tx, input.id, input.to_document_id);
         const request = {
           page_no: input.page_no, to_document_id: input.to_document_id,
@@ -662,7 +664,7 @@ export function registerCorrectionRoutes(app: FastifyInstance): void {
             pageCount: count, encounterId: null, status: 'ready',
             s1ArtifactKey: null, s1PromptVersion: null, personCheck: 'unknown',
           }).where(eq(document.id, current.id));
-          await requeueStage1(tx, current.id, current.personId);
+          await dropDocumentProcessing(tx, current.id);
         }
         await appendJournal(tx, source.personSlug, {
           schema_version: '1.0', event: 'document_move_page',
@@ -681,6 +683,8 @@ export function registerCorrectionRoutes(app: FastifyInstance): void {
         });
         return result;
       });
+      await scheduleCorrectedDocuments(app, [input.id, input.to_document_id]);
+      return result;
     },
   });
 }

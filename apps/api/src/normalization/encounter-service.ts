@@ -1,23 +1,19 @@
 import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import {
-  EncounterCandidateDocument, EncounterProposal, type EncounterCandidateDocumentT,
+  EncounterCandidateDocument, type EncounterCandidateDocumentT,
   type EncounterProposalT,
 } from '@amr/contracts';
 import { callEncounterSuggestion, EncounterSuggestionError } from '@amr/ai';
 import { uuidv7 } from 'uuidv7';
-import { db, type Tx } from '../db/client.js';
-import { account, document, encounter, normalizationDecision } from '../db/schema.js';
+import { db } from '../db/client.js';
+import { account, document, normalizationDecision } from '../db/schema.js';
 import { encounterCandidatePairs, proposalsFromEncounterJudgments } from './encounter-candidates.js';
+import { EncounterDecisionFailure } from './encounter-decisions.js';
 import { encounterFingerprint, encounterPairFingerprint } from './encounter-fingerprint.js';
 
-export class EncounterJobFailure extends Error {
-  constructor(
-    readonly terminal: 'needs_human' | 'failed',
-    readonly detail: { stage: string; code: string; message: string; category?: string | null },
-  ) {
-    super(detail.message);
-  }
-}
+export { applyEncounterDecision } from './encounter-decisions.js';
+
+export class EncounterJobFailure extends EncounterDecisionFailure {}
 
 async function ungroupedDocuments(personId: string): Promise<EncounterCandidateDocumentT[]> {
   const rows = await db.select({
@@ -37,46 +33,10 @@ async function ungroupedDocuments(personId: string): Promise<EncounterCandidateD
   }));
 }
 
-/** 人工确认后的确定性执行。AI handler 绝不会调用它。 */
-export async function applyEncounterDecision(
-  tx: Tx,
-  proposalInput: unknown,
-  state: 'confirmed' | 'rejected',
-): Promise<string | null> {
-  const proposal = EncounterProposal.parse(proposalInput);
-  if (state === 'rejected') return null;
-  const documents = await tx.select({
-    id: document.id, personId: document.personId, facilityId: document.facilityId,
-    encounterId: document.encounterId,
-  }).from(document).where(inArray(document.id, proposal.document_ids));
-  if (documents.length !== proposal.document_ids.length
-      || documents.some((item) => item.personId !== proposal.person_id || item.facilityId !== proposal.facility_id)) {
-    throw new EncounterJobFailure('needs_human', {
-      stage: 'encounter_confirm', code: 'documents_changed', message: '候选文档的归属或机构已经变化，请重新生成建议',
-    });
-  }
-  if (documents.some((item) => item.encounterId !== null && item.encounterId !== proposal.encounter_id)) {
-    throw new EncounterJobFailure('needs_human', {
-      stage: 'encounter_confirm', code: 'already_grouped', message: '至少一份候选文档已归入其他就诊',
-    });
-  }
-  await tx.insert(encounter).values({
-    id: proposal.encounter_id, personId: proposal.person_id,
-    encounterType: proposal.encounter_type, facilityId: proposal.facility_id,
-    department: proposal.department, occurredOn: proposal.occurred_on,
-    occurredAt: proposal.occurred_at ? new Date(proposal.occurred_at) : null,
-    groupingBasis: proposal.grouping_basis,
-  }).onConflictDoNothing({ target: encounter.id });
-  await tx.update(document).set({ encounterId: proposal.encounter_id })
-    .where(inArray(document.id, proposal.document_ids));
-  return proposal.encounter_id;
-}
-
 export async function handleEncounterSuggest(personId: string): Promise<{ decisionIds: string[] }> {
   const documents = await ungroupedDocuments(personId);
   const allPairs = encounterCandidatePairs(documents);
   if (allPairs.length === 0) return { decisionIds: [] };
-
   const fingerprints = allPairs.map((pair) => encounterPairFingerprint(personId, pair));
   const cached = await db.select({ inputFingerprint: normalizationDecision.inputFingerprint })
     .from(normalizationDecision).where(and(

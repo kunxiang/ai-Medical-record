@@ -1,5 +1,7 @@
 # 06 · AI 管线
 
+> **现行边界（2026-08-28）：** 本文描述的是可选 processing plugin 的资格与演进设计，不是 P0–P4 Core 运行的前置条件。`PROCESSING_MODE=off` 是默认值；API 不加载 provider adapter，`plugin-main` 可整体不部署。归档、情境、人工 observation/medication/timeline、趋势与确定性导出在无 key/无网络时必须端到端可用。AI 输出只是带 provider/model/prompt/artifact provenance 的 L2 建议，未确认时不进入 Core 事实、趋势或导出。详见 [ADR-051](./adr.md#adr-051--p0p4-core-与-ai-插件资格分轨)。
+
 ## 0. 总览
 
 ```

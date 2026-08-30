@@ -855,3 +855,23 @@ M1 已经在生成旋正后的派生物(`thumb`/`preview`),但 `preview` 长边�
 - **单请求超过 20 张图会触发更严的逐图尺寸限制**(每张需 ≤ 2000 px)。多页文档一次送多页时必须计数:>20 页则分批,或降到 2000 px。M2 的多页合并调用须遵守。
 - `ai-NN.webp` 与其他派生物同属 L2:不上锁、可整体删除、可重生;不进权威矩阵的 L1 行,但要进 L2 行与 `parseKey`。
 - 原件仍然是唯一真相:任何"模型看错了"的复核,都回到原件,不回到派生物。
+
+---
+
+## ADR-051 · P0–P4 Core 与 AI 插件资格分轨
+
+> **状态：已接受并实现（2026-08-28）。** 补充 ADR-044/045，纠正早期路线将 M2 AI 验收当作检索、结构化、趋势和导出前置条件的偶合。
+
+**决策：** P0–P4 的人工归档、情境、结构化事实、关键词检索、趋势和确定性导出构成 Core，必须在无模型 key、无 provider 网络、无 AI worker 时端到端通过。`PROCESSING_MODE=off` 是默认运行姿态。
+
+AI/ASR/OCR/semantic 能力只能由独立 `plugin-main` 进程通过 provider-neutral processing queue 提供；API 进程不加载 provider adapter。插件输出是带 provider/model/prompt/artifact provenance 的 L2 建议，未经用户显式接受时不得写入 effective fact，也不得进入 Core search/trend/export。
+
+`export-main` 是 Core worker，它冻结 canonical input，使用固定 renderer/font/version 生成 PDF/PNG，不调用模型，也不生成医学结论。导出对象可丢弃并按冻结输入重生，但人工事实和 journal 仍属 L1。
+
+**发布门禁：**
+
+- Core gate：`PROCESSING_MODE=off` 下类型、单测、API/真实浏览器、权限、确定性导出与删库重建；
+- Plugin qualification：provider/model/prompt/wire cassette/真实单据质量，可独立延后、替换或停用；
+- 20 份脱敏真实单据只属于插件/现场质量基线，不得倒挂为 Core P0–P4 的必要条件。
+
+**后果：** 任何新 Core 功能都必须先有无 AI 的用户路径；插件不可用只会隐藏辅助入口，不能制造失败 job、错误横幅或残缺导航。任何依赖模型才能完成的建议都必须标记为 assist，不能宣称为 Core 交付。

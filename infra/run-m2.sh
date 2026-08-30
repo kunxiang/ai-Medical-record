@@ -57,8 +57,8 @@ pnpm --filter @amr/tools --silent run provision-bucket
 pnpm --filter @amr/tools --silent run gen-meta
 pnpm --filter @amr/tools --silent run seed-account
 
-echo "== 启动 API（不启动 worker，恢复演练不得调用 AI）=="
-( cd "$ROOT/apps/api" && exec env AI_JOB_WORKER=0 PORT="$API_PORT" \
+echo "== 启动 Core API（processing off，恢复演练不得调用 AI）=="
+( cd "$ROOT/apps/api" && exec env PROCESSING_MODE=off PORT="$API_PORT" \
     node --import ./node_modules/tsx/dist/loader.mjs src/main.ts ) & API_PID=$!
 for i in $(seq 1 60); do
   status=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$API_URL/api/v1/auth/login" \

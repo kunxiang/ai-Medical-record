@@ -10,7 +10,7 @@ import { db } from '../db/client.js';
 import { aiJob, document, person, personAccess } from '../db/schema.js';
 import { defineRoute } from '../define-route.js';
 import { ApiError, notFound } from '../errors.js';
-import { resetForRerun } from '../jobs/queue.js';
+import { scheduleDocumentMetadataRerun } from '../processing/scheduling.js';
 
 // spec m2-04 §5。三个端点,全部经 defineRoute 与既有鉴权;越权一律 404 且与不存在不可区分。
 
@@ -126,11 +126,12 @@ export function registerAiRoutes(app: FastifyInstance): void {
     handler: async ({ input, accountId }) => {
       // 一次只作用于一个文档 —— 批量补跑由 tools/ 侧脚本负责,不开放为 API(m2-04 §5.3)
       await requireDocumentAccess(accountId, input.id, 'editor');
-      const j = (await db.select().from(aiJob)
-        .where(and(eq(aiJob.documentId, input.id), eq(aiJob.kind, input.kind))).limit(1))[0];
-      if (!j) throw notFound();
-      await resetForRerun(j.id);
-      return { job_id: j.id, state: 'pending' as const };
+      if (input.kind !== 'stage1') throw notFound();
+      const job = await scheduleDocumentMetadataRerun(input.id);
+      if (!job) {
+        throw new ApiError('capability_unavailable', '智能元数据辅助当前不可用');
+      }
+      return { job_id: job.id, state: 'pending' as const };
     },
   });
 }

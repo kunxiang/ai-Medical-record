@@ -7,7 +7,7 @@ import type { CreatePersonInput } from '../../api/client.js';
 import type { Person } from '../../App.js';
 import { CaptureRejected, appendDraftPage, finalizeDraft, preparePage, reassignQueued } from '../../offline/capture.js';
 import { ensureRoomFor } from '../../offline/persist.js';
-import type { CaptureRecord } from '../../offline/db.js';
+import { getCapture, type CaptureRecord } from '../../offline/db.js';
 import { QueuePanel } from './QueuePanel.js';
 import { CreatePersonDialog } from './CreatePersonDialog.js';
 import { DraftGallery } from './DraftGallery.js';
@@ -26,6 +26,7 @@ export function CaptureView({
   onCreatePerson,
   queue,
   onQueueChanged,
+  onCaptureFinished,
 }: {
   people: Person[];
   selected: Person | null;
@@ -33,6 +34,7 @@ export function CaptureView({
   onCreatePerson: (input: CreatePersonInput) => Promise<Person>;
   queue: CaptureRecord[];
   onQueueChanged: () => Promise<void>;
+  onCaptureFinished?: (capture: CaptureRecord) => void | Promise<void>;
 }): JSX.Element {
   const cameraRef = useRef<HTMLInputElement>(null);
   const albumRef = useRef<HTMLInputElement>(null);
@@ -72,10 +74,13 @@ export function CaptureView({
 
   async function finish(): Promise<void> {
     if (!draftId) return;
-    await finalizeDraft(draftId);
+    const finishedId = draftId;
+    await finalizeDraft(finishedId);
+    const finished = await getCapture(finishedId);
     setDraftId(null);
     setDraftPages(0);
     await onQueueChanged();
+    if (finished) await onCaptureFinished?.(finished);
     void tick('after-finalize');
   }
 

@@ -6,6 +6,7 @@ export const RelationToOwner = z.enum(['self', 'spouse', 'parent', 'child', 'sib
 export const IdentifierType = z.enum(['patient_id', 'card_no', 'medical_record_no', 'other']);
 export const IdentifierScope = z.enum(['long_term', 'single_visit']);
 export const AccessRole = z.enum(['owner', 'editor', 'viewer']);
+export type AccessRoleT = z.infer<typeof AccessRole>;
 // `split` 是服务端边界纠正产生的合成来源；上传登记接口会显式拒绝客户端提交该值。
 export const DocumentSource = z.enum(['camera', 'album', 'pdf', 'screenshot', 'scan', 'import', 'split']);
 export const DocumentStatus = z.enum([

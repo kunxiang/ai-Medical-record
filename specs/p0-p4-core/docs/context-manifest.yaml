@@ -1,0 +1,156 @@
+version: 1
+task: p0-p4-core
+generated_on: "2026-08-28"
+source_commit: "e69709455f353f85d22e691efc716bfa397f704c"
+task_document: specs/p0-p4-core/CLAUDE.md
+tasks_document: specs/p0-p4-core/tasks.md
+required_skill_route: fullstack
+phase: manual_acceptance_pending
+
+source_types:
+  - current_code
+  - current_tests_and_results
+  - design_docs
+  - milestone_specs
+  - durable_engineering_wiki
+  - runtime_work_wiki
+  - product_feature_wiki
+
+expanded_paths:
+  - docs/00-vision-and-scope.md
+  - docs/01-architecture.md
+  - docs/03-data-model.md
+  - docs/04-storage-layout.md
+  - docs/05-capture-and-context.md
+  - docs/06-ai-pipeline.md
+  - docs/07-api-contract.md
+  - docs/08-medical-reference.md
+  - docs/09-roadmap.md
+  - docs/11-deployment.md
+  - docs/design-debt.md
+  - docs/adr.md
+  - specs/m2/00-scope.md
+  - specs/m2/99-acceptance.md
+  - specs/m2/RESULTS.md
+  - specs/m2/ACCEPTANCE-COVERAGE.md
+  - apps/api/src/server.ts
+  - apps/api/src/exports/
+  - apps/api/src/services/
+  - apps/api/src/workers/export-worker.ts
+  - apps/api/src/routes/context.ts
+  - apps/api/src/routes/observations.ts
+  - apps/api/src/routes/medications.ts
+  - apps/api/src/routes/timeline-events.ts
+  - apps/api/src/routes/exports.ts
+  - apps/api/src/routes/shared-exports.ts
+  - apps/api/src/routes/documents.ts
+  - apps/api/src/db/schema.ts
+  - packages/ai/src/models.ts
+  - packages/ai/src/transport.ts
+  - packages/contracts/src/document.ts
+  - packages/contracts/src/journal.ts
+  - packages/contracts/src/context.ts
+  - packages/contracts/src/observation.ts
+  - packages/contracts/src/trends.ts
+  - packages/contracts/src/medication.ts
+  - packages/contracts/src/exports.ts
+  - packages/medical/
+  - tools/src/core-acceptance.ts
+  - tools/src/p0-web-acceptance.ts
+  - agent_wiki/architecture-data-and-security.md
+  - agent_wiki/runtime/m2-implementation-status.md
+  - feature_wiki/ai-metadata-and-jobs.md
+  - feature_wiki/capture-archive-and-browse.md
+  - feature_wiki/core-context-data-trends-and-exports.md
+  - specs/p0-p4-core/RESULTS.md
+  - specs/p0-p4-core/review-code.md
+  - specs/p0-p4-core/MANUAL-ACCEPTANCE.md
+  - specs/p0-p4-core/manual-evidence.template.json
+  - specs/p0-p4-core/evidence/
+
+deferred_paths:
+  - path: fixtures/m2/regression
+    reason: "AI 质量基线继续延期；它不再是核心 P0-P4 的完成前置。"
+  - path: fixtures/m2/cassettes
+    reason: "只服务 AI 插件兼容性；不参与核心主线设计输入。"
+
+negative_searches:
+  - query: "context_session|context_answer|observation|metric_group in current application code"
+    result: "规划时尚无 P1-P3 业务实现；截至 2026-08-28 已由 P1-P4 schema/service/routes/Web/acceptance 取代。"
+  - query: "AI optional plugin runtime boundary"
+    result: "规划时只有 ADR-045 数据分层；截至 2026-08-28 已完成 API/plugin/export process split 与 PROCESSING_MODE=off 总验收。"
+  - query: "standard backend/app/apps task workspace"
+    result: "本仓库不采用 EcksteinAPP 任务目录；沿用根级 specs/<task> 约定。"
+
+selected_findings:
+  - id: product-priority
+    relevance: "P0-P4 是用户价值优先级，不能用模型实施里程碑替代。"
+    source_hashes:
+      docs/00-vision-and-scope.md: "72353a3bed77bfea84f74f7a4e4681544b07d48303e6c47bdd3023ce276cc370"
+      docs/09-roadmap.md: "0db18a74ed41c55a541819a34828ab542ae34724db905b116ff705609958b759"
+  - id: layer-boundary
+    relevance: "L1 必须自足，L2/L3 可整体删除和替换。"
+    source_hashes:
+      docs/01-architecture.md: "31b4181a8b867015a2faba64d40a0914fef6249d99efac3d80166b44d71ad07a"
+      docs/04-storage-layout.md: "776c87fd922560e96ec4cfeebad9daf5c165b2063d2e1f0ff33e1b8c78a73516"
+      docs/adr.md: "c36dcee2e73bd2a1f1e511d1ce6e39945663ac4c321db76ef50a8bbf68257c27"
+  - id: runtime-coupling
+    relevance: "当前无 AI 部署仍静态加载 worker，且每个文档登记都会投递 Stage 1。"
+    source_hashes:
+      apps/api/src/server.ts: "0a077f8690cd55469de468ac0272f65e89a910ded6d238dbeed4d0a93298241e"
+      apps/api/src/routes/documents.ts: "0aea76079cff2fd85814192162c6cc36a35c1c8f125ee9ab0722b34414af3556"
+      apps/api/src/db/schema.ts: "7ea30fbe089ff63f1dc52f446768cbd9e5f4bb699c1eb9192765f1813f82a28a"
+  - id: gate-coupling
+    relevance: "M2 关闭被真实 wire cassette 和真实单据质量基线阻塞，需拆成核心 gate 与插件资格 gate。"
+    source_hashes:
+      specs/m2/00-scope.md: "98a8bde4ab70f0f291121aff187389690a0bf22a921f87b98f6a62ca92b73d61"
+      specs/m2/99-acceptance.md: "11dc8e59bbc68e45e208a772d74398a730ad1d98c3ed0f4d43bc8c19782fe5ee"
+  - id: manual-core-paths
+    relevance: "现有设计已定义 context、observation、trend、export 数据形态，可改为 manual-first 而无需改变产品非目标。"
+    source_hashes:
+      docs/03-data-model.md: "b239fe781e82d4221eb3ba0aaa11a8c1155cd3d70b5d589fda494aee2c71fd50"
+      docs/05-capture-and-context.md: "7530cb179c52f6d9f5912f85a5b2e872d9b767d596025c1a4af1e6fc60a91de2"
+      docs/07-api-contract.md: "3d6a98e4f8300c1b57dce977b556346b21da14a96fc50b59c1d56e36337aa2b6"
+      docs/08-medical-reference.md: "94ca512510953d585ea6b1ee497613852a7606b85f1102ffb5181fad9c5facf9"
+
+blocking_unknowns: []
+
+spec_outputs:
+  - specs/p0-p4-core/specs/01_design_spec.md
+  - specs/p0-p4-core/specs/02_api_contracts.md
+  - specs/p0-p4-core/specs/03_database.md
+  - specs/p0-p4-core/specs/04_acceptance.md
+  - specs/p0-p4-core/specs/05_ux_states.md
+  - specs/p0-p4-core/review-001.md
+  - specs/p0-p4-core/review-002.md
+
+invalidations:
+  - finding: "M2 must close before downstream product milestones proceed"
+    status: "superseded_by_owner_decision_2026-08-28"
+  - finding: "AI extracted metadata/full_text is the only viable search source"
+    status: "rejected_for_core_track; manual metadata/context/confirmed observations form the deterministic keyword corpus"
+  - finding: "AI result quality is a product release gate"
+    status: "superseded_by_owner_decision_2026-08-28"
+
+implementation_candidates:
+  architecture:
+    - apps/api/src/server.ts
+    - apps/api/src/routes/documents.ts
+    - apps/api/src/jobs/
+    - packages/ai/
+  core_data:
+    - apps/api/src/db/schema.ts
+    - apps/api/drizzle/
+    - packages/contracts/src/
+    - apps/api/src/journal.ts
+    - tools/src/rebuild-index.ts
+  frontend:
+    - apps/web/src/App.tsx
+    - apps/web/src/api/client.ts
+    - apps/web/src/features/
+  deterministic_domain:
+    - packages/medical/
+  acceptance:
+    - infra/
+    - tools/src/
+    - specs/

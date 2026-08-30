@@ -1,6 +1,16 @@
 import { z } from 'zod';
 import { DocShortId, IsoDateTime, PersonSlug, Sha256Hex, Uuid } from './scalars.js';
 import { PersonSidecar } from './person.js';
+import { DocumentManualMetadataSnapshot } from './metadata.js';
+import { Encounter } from './encounter.js';
+import {
+  ContextAnswer, ContextSession, ContextUploadSnapshot,
+} from './context.js';
+import {
+  ConceptAliasDecision, MedicalConcept, Observation,
+} from './observation.js';
+import { MetricGroup } from './trends.js';
+import { Medication, TimelineEvent } from './medication.js';
 
 // spec m0-01 §5:M0 只有 person_update。后续里程碑向 union 追加;
 // 禁止修改已有事件 schema(只能加新 schema_version)。
@@ -91,10 +101,147 @@ export const JournalDocumentMerge = z
 export const JournalDocumentMovePage = z
   .object({ ...M2Base, event: z.literal('document_move_page'), ...boundaryFields }).strict();
 
+export const OperationReplay = z.object({
+  request_hash: Sha256Hex,
+  response_snapshot: z.record(z.unknown()),
+}).strict();
+
+export const FacilitySnapshot = z.object({
+  id: Uuid,
+  slug: z.string(),
+  name: z.string(),
+  aliases: z.array(z.string()),
+  city: z.string().nullable(),
+  level: z.string().nullable(),
+}).strict();
+
+const P0FactBase = {
+  ...M2Base,
+  person_slug: PersonSlug,
+  subject_id: Uuid,
+  revision: z.number().int().min(1),
+  operation_replay: OperationReplay,
+};
+
+export const JournalDocumentMetadataUpsert = z.object({
+  ...P0FactBase,
+  event: z.literal('document_metadata_upsert'),
+  before: DocumentManualMetadataSnapshot.nullable(),
+  after: DocumentManualMetadataSnapshot,
+  references: z.object({
+    facility: FacilitySnapshot.nullable(),
+    suggestion: z.record(z.unknown()).nullable(),
+  }).strict(),
+}).strict();
+
+export const JournalEncounterUpsert = z.object({
+  ...P0FactBase,
+  event: z.literal('encounter_upsert'),
+  before: Encounter.nullable(),
+  after: Encounter,
+  references: z.object({ facility: FacilitySnapshot.nullable() }).strict(),
+}).strict();
+
+export const JournalEncounterDocumentsSet = z.object({
+  ...P0FactBase,
+  event: z.literal('encounter_documents_set'),
+  before_document_ids: z.array(Uuid),
+  after_document_ids: z.array(Uuid),
+  after: Encounter,
+  references: z.object({ facility: FacilitySnapshot.nullable() }).strict(),
+}).strict();
+
+export const JournalContextSessionUpsert = z.object({
+  ...P0FactBase,
+  event: z.literal('context_session_upsert'),
+  before: ContextSession.nullable(),
+  after: ContextSession,
+  references: z.object({}).strict(),
+}).strict();
+
+export const JournalContextAnswerUpsert = z.object({
+  ...P0FactBase,
+  event: z.literal('context_answer_upsert'),
+  before: z.array(ContextAnswer),
+  after: z.array(ContextAnswer),
+  session_after: ContextSession,
+  references: z.object({}).strict(),
+}).strict();
+
+export const JournalContextMediaFinalize = z.object({
+  ...P0FactBase,
+  event: z.literal('context_media_finalize'),
+  before: z.null(),
+  after: ContextUploadSnapshot,
+  references: z.object({}).strict(),
+}).strict();
+
+export const JournalObservationUpsert = z.object({
+  ...P0FactBase,
+  event: z.literal('observation_upsert'),
+  before: z.array(Observation),
+  after: z.array(Observation).min(1).max(100),
+  correction_note: z.string().max(2_000).nullable(),
+  references: z.object({
+    concepts: z.array(MedicalConcept),
+    facilities: z.array(FacilitySnapshot),
+    suggestion: z.record(z.unknown()).nullable().default(null),
+  }).strict(),
+}).strict();
+
+export const JournalConceptAliasUpsert = z.object({
+  ...P0FactBase,
+  event: z.literal('concept_alias_upsert'),
+  before: ConceptAliasDecision.nullable(),
+  after: ConceptAliasDecision,
+  observations_before: z.array(Observation),
+  observations_after: z.array(Observation).max(100),
+  references: z.object({ concept: MedicalConcept }).strict(),
+}).strict();
+
+export const JournalMetricGroupUpsert = z.object({
+  ...P0FactBase,
+  event: z.literal('metric_group_upsert'),
+  before: MetricGroup.nullable(),
+  after: MetricGroup,
+  references: z.object({}).strict(),
+}).strict();
+
+export const JournalMetricGroupArchive = z.object({
+  ...P0FactBase,
+  event: z.literal('metric_group_archive'),
+  before: MetricGroup,
+  after: MetricGroup,
+  references: z.object({}).strict(),
+}).strict();
+
+export const JournalMedicationUpsert = z.object({
+  ...P0FactBase,
+  event: z.literal('medication_upsert'),
+  before: z.array(Medication),
+  after: z.array(Medication).min(1).max(100),
+  correction_note: z.string().max(2_000).nullable(),
+  references: z.object({}).strict(),
+}).strict();
+
+export const JournalTimelineEventUpsert = z.object({
+  ...P0FactBase,
+  event: z.literal('timeline_event_upsert'),
+  before: TimelineEvent.nullable(),
+  after: TimelineEvent,
+  correction_note: z.string().max(2_000).nullable(),
+  references: z.object({}).strict(),
+}).strict();
+
 export const JournalEvent = z.discriminatedUnion('event', [
   JournalPersonUpdate, JournalCaptureDiscard,
   JournalPersonCheckAck, JournalPersonReassign, JournalDocumentArchive,
   JournalDocumentSplit, JournalDocumentMerge, JournalDocumentMovePage,
+  JournalDocumentMetadataUpsert, JournalEncounterUpsert, JournalEncounterDocumentsSet,
+  JournalContextSessionUpsert, JournalContextAnswerUpsert, JournalContextMediaFinalize,
+  JournalObservationUpsert, JournalConceptAliasUpsert,
+  JournalMetricGroupUpsert, JournalMetricGroupArchive,
+  JournalMedicationUpsert, JournalTimelineEventUpsert,
 ]);
 
 // 事件注册表(_meta/registries 与 README 的内容来源)
@@ -102,6 +249,11 @@ export const JOURNAL_EVENT_REGISTRY = [
   'person_update', 'capture_discard',
   'person_check_ack', 'person_reassign', 'document_archive',
   'document_split', 'document_merge', 'document_move_page',
+  'document_metadata_upsert', 'encounter_upsert', 'encounter_documents_set',
+  'context_session_upsert', 'context_answer_upsert', 'context_media_finalize',
+  'observation_upsert', 'concept_alias_upsert',
+  'metric_group_upsert', 'metric_group_archive',
+  'medication_upsert', 'timeline_event_upsert',
 ] as const;
 
 // ── M2:不绑人的判断落 _index/decisions/(m2-01 §4.2)──

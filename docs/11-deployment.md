@@ -7,11 +7,13 @@
 | 能力 | 状态 |
 |---|---|
 | 采集管道(拍照/相册/PDF → 离线队列 → 上传 → 归档) | ✅ M1 已验收(88/88) |
-| 浏览(按人 → 时间轴 → 缩略图/预览) | ✅ M1 |
-| AI 元数据(S1 分类/日期/机构 + 归人对账) | 🚧 M2 进行中：能力已实现；18/42 个 A 场景已自动化、B=15/15，真实 wire cassette 尚缺，C 组真实数据基线经 owner 确认延期 |
-| 情境问答 / 检索 / 趋势 / 导出 | ❌ M3+ |
+| 浏览、人工元数据/就诊、关键词检索 | ✅ P0 Core 自动验收通过 |
+| 情境问答、安全音频/照片归档 | ✅ P1 Core 自动验收通过 |
+| 人工 observation/medication/timeline、趋势 | ✅ P2–P4 Core 自动验收通过 |
+| 确定性 PDF/PNG 导出、历史、重试、分享/撤销 | ✅ P4 Core 自动验收通过；项目所有者/医生人工 gate 待执行 |
+| AI 元数据(S1 分类/日期/机构 + 归人对账) | 🚧 可选 M2 plugin rollout；不是 Core 发布 gate |
 
-**部署测试的目标是验证 M1 那条链路在真实环境里成立**,M2 的部分以"能跑起来、不阻断"为准。
+Core 发布以 `PROCESSING_MODE=off` 验证：无模型 key、无 plugin worker、无供应商网络时仍必须完整可用。AI 需要时以独立 plugin 资格轨部署，不改变 Core gate。
 
 ## 1. 组件与依赖
 
@@ -22,10 +24,15 @@
        │  预签名直传                │
        │                            ├──> PostgreSQL 16
        └────────────────────────────┴──> 对象存储(S3 兼容)
+
+                 export worker ──> PostgreSQL/S3（Core，必需）
+                 plugin worker ──> 模型供应商（可选）
 ```
 
 - **PWA**:`apps/web` 构建产物,纯静态。**必须** HTTPS —— 非安全上下文下 `crypto.subtle`、Service Worker、Web Locks、StorageManager 全部不可用,采集链路直接失效。
 - **API**:`apps/api`,Node 22+。
+- **export worker**:`apps/api/dist/export-main.js`，消费确定性导出队列，不调用 AI。
+- **plugin worker（可选）**:`apps/api/dist/plugin-main.js`，仅在 `PROCESSING_MODE=assist` 下调用 provider。
 - **PostgreSQL 16**。
 - **对象存储**:S3 兼容。能力要求见 §3。
 
@@ -43,9 +50,12 @@
 | `S3_KMS_KEY_ID` | — | `provision-bucket` 配置 SSE-KMS 时使用；当前 MinIO 测试环境需要显式 key id |
 | `WEB_ORIGIN` | ✅ | 逗号分隔。**禁止 `*`** —— 带 `Authorization` 的跨源请求需要精确 origin |
 | `PORT` | — | 默认 8300 |
-| `AI_JOB_CONCURRENCY` | — | 默认 2 |
-| `AI_JOB_WORKER` | — | `0` 关闭作业轮询器(验收时用) |
-| `AI_PROVIDER` | M2 起 | `anthropic` 或 `deepseek`；未配时依 key 存在性兼容旧部署 |
+| `PROCESSING_MODE` | — | `off`(默认 Core) 或 `assist`；API 在 off 时不投递处理作业 |
+| `EXPORT_WORKER_CONCURRENCY` | — | 确定性导出 worker 并发，默认 1 |
+| `EXPORT_LEASE_MS` | — | 导出 job lease，默认 2 分钟 |
+| `AI_JOB_CONCURRENCY` | plugin | 默认 2 |
+| `PROCESSING_PLUGIN_ID` / `PROCESSING_PLUGIN_VERSION` | plugin | 插件心跳和 provenance 身份 |
+| `AI_PROVIDER` | plugin | `anthropic` 或 `deepseek` |
 | `AI_MODEL` | — | 可选的显式模型 ID；DeepSeek 视觉默认 `deepseek-v4-flash-vision-exp` |
 | `ANTHROPIC_API_KEY` | M2 起 | `AI_PROVIDER=anthropic` 时必需 |
 | `DEEPSEEK_API_KEY` | M2 起 | `AI_PROVIDER=deepseek` 时必需；图片/文本走 Responses API，PDF 走 Anthropic document 兼容层 |
@@ -113,8 +123,12 @@ WEB_ORIGIN=https://your.domain \
 pnpm --filter @amr/tools gen-meta
 SEED_EMAIL=... SEED_PASSWORD=... pnpm --filter @amr/tools seed-account
 
-# 5) 起 API
+# 5) 起 API 与 Core 导出 worker
 DATABASE_URL=... AUTH_SECRET=... S3_... WEB_ORIGIN=... node apps/api/dist/main.js
+DATABASE_URL=... AUTH_SECRET=... S3_... WEB_ORIGIN=... node apps/api/dist/export-main.js
+
+# 可选：只有 assist 部署才启动
+PROCESSING_MODE=assist DATABASE_URL=... AUTH_SECRET=... S3_... node apps/api/dist/plugin-main.js
 
 # 6) 构建并部署 PWA(纯静态,任何静态托管均可)
 VITE_API_BASE=https://api.your.domain bash infra/deploy.sh build
@@ -140,7 +154,7 @@ API(`apps/api`)**不要**上 Vercel,四条都是硬伤,不是调优问题:
 
 | 依赖 | 与 Vercel 函数模型的冲突 |
 |---|---|
-| `startWorker()` 的 `setInterval` 轮询(3s 取作业 / 60s 收僵尸) | 函数只在请求期间存活,响应一返回就冻结 —— 作业队列**永远不会被消费**,`ai_job` 只进不出 |
+| export/plugin worker 的长轮询和 lease | 函数只在请求期间存活,响应一返回就冻结；Core 导出和可选 processing job 都无法可靠消费 |
 | Stage-1 调视觉模型 API,超时设 600s | 超过 Vercel 函数的最长执行时长;长图批次会被拦腰截断,重试也一样 |
 | `initSharp()` + 请求路径里现算派生物 | sharp 是原生模块,进程级全局;每次冷启动重新初始化,派生物生成会顶到超时 |
 | postgres.js 长连接 | 无服务器需要连接池代理,否则并发一上来就打爆 Postgres 连接数 |
@@ -177,6 +191,8 @@ docker compose --env-file infra/.env.local -f infra/docker-compose.medireco.yml 
 
 修改代码后用 `up -d --build` 重建。普通 `down` 保留 PostgreSQL 和 MinIO 命名卷；除非明确要删除全部测试数据，否则不要使用 `down -v`。
 
+当前 Compose 将 `api`、`export-worker`、`plugin-worker` 分成三个进程。Core-only 部署必须启动前两者并将 `PROCESSING_MODE=off`；需要 AI 辅助时再额外启动 plugin worker。
+
 Caddy 站点片段保存在 `infra/Caddyfile.medireco`。主机上的合并配置由既有 `eckstein-edge-proxy` 加载，修改前应先备份并运行 `caddy validate`。首次创建数据卷后还需依次执行数据库迁移、`provision-bucket`、`gen-meta` 和 `seed-account`；当前主机已经完成这些初始化。
 
 ## 5. 部署冒烟
@@ -189,7 +205,7 @@ API_URL=https://api.your.domain SEED_EMAIL=... SEED_PASSWORD=... \
   pnpm --filter @amr/tools deploy-smoke
 ```
 
-覆盖:鉴权(含错误口令被拒)→ 建档 → presign → **真实预签名直传** → 登记 → 幂等重放 200 → L1 三件套落桶 → 派生物 → 浏览 → AI 作业已同事务投递。
+基础 deploy smoke 覆盖鉴权→建档→真实预签名直传→登记→幂等重放→L1 落桶→浏览。完整 P0–P4 无 AI 验收使用 `pnpm core:acceptance`，其中还包含导出 worker、分享隔离、真实浏览器与两轮删库重建。
 
 ## 6. 启动时会看到的 WORM 姿态
 

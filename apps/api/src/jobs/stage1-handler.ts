@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import { and, eq, sql } from 'drizzle-orm';
+import { uuidv7 } from 'uuidv7';
 import { S1Artifact, Stage1Out, type Stage1OutT } from '@amr/contracts';
 import {
   S1Error, assertBatchPages, callS1, callS1Pdf, getPrompt,
@@ -6,7 +8,7 @@ import {
 } from '@amr/ai';
 import { buildKey, canonicalJson, serverTimestamp } from '@amr/storage';
 import { db } from '../db/client.js';
-import { document, documentPage, person } from '../db/schema.js';
+import { document, documentPage, person, processingSuggestion } from '../db/schema.js';
 import { ensureDerivative } from '../derivatives.js';
 import { getObjectBytes, getObjectText, presignGetKey, putWorm } from '../s3.js';
 import { normalizeName, personCheckOf } from '../person-check.js';
@@ -102,7 +104,12 @@ async function runPdfS1(bytes: Buffer, pageCount: number): Promise<{
   return { ...result, batches: 1 };
 }
 
-export async function handleStage1(documentId: string): Promise<{ resultKey: string }> {
+export async function handleStage1(documentId: string, suggestionTarget?: {
+  pluginId: string;
+  pluginVersion: string;
+  inputRevision: number;
+  inputSha256: string;
+}): Promise<{ resultKey: string }> {
   const ctx = await loadContext(documentId);
   if (!ctx) throw new Stage1Failure('failed', { stage: 'load', code: 'document_not_found', message: `文档不存在: ${documentId}` });
 
@@ -215,6 +222,34 @@ export async function handleStage1(documentId: string): Promise<{ resultKey: str
 
     if (out.facility_name_raw !== null) {
       await scheduleFacilityNormalization(tx, out.facility_name_raw);
+    }
+    if (suggestionTarget) {
+      await tx.insert(processingSuggestion).values({
+        id: uuidv7(), capability: 'document_metadata_suggest',
+        subjectType: 'document', subjectId: documentId, personId: ctx.personId,
+        inputRevision: suggestionTarget.inputRevision,
+        inputSha256: suggestionTarget.inputSha256,
+        payload: {
+          doc_type: out.doc_type,
+          sampled_on: out.sampled_on,
+          reported_on: out.reported_on,
+          facility_name_raw: out.facility_name_raw,
+          department: out.department_raw,
+        },
+        pluginId: suggestionTarget.pluginId,
+        pluginVersion: suggestionTarget.pluginVersion,
+        model: artifact.model,
+        promptId: artifact.prompt_id,
+        promptVersion: String(artifact.prompt_version),
+        artifactKey,
+        artifactSha256: createHash('sha256').update(canonicalJson(artifact)).digest('hex'),
+      }).onConflictDoNothing({
+        target: [
+          processingSuggestion.capability, processingSuggestion.subjectType,
+          processingSuggestion.subjectId, processingSuggestion.pluginId,
+          processingSuggestion.pluginVersion, processingSuggestion.inputSha256,
+        ],
+      });
     }
   });
 

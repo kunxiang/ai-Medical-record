@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import {
   CalendarDays, CircleUserRound, Clock3, KeyRound, LogOut, Mail,
-  ShieldCheck, Trash2, TriangleAlert,
+  ShieldCheck, Sparkles, Trash2, TriangleAlert,
 } from 'lucide-react';
-import type { AccountProfileT } from '@amr/contracts';
+import type { AccountProfileT, CapabilitiesResponseT } from '@amr/contracts';
 import { api, ApiFailure } from '../../api/client.js';
 import { PageHeader } from '../../ui/PageHeader.js';
 import { Card } from '../../ui/Card.js';
@@ -28,10 +28,14 @@ export function AccountView({
   queuedItemCount,
   onLogout,
   onDeleteAccount,
+  capabilities,
+  capabilityStatus,
 }: {
   queuedItemCount: number;
   onLogout: () => void;
   onDeleteAccount: (password: string) => Promise<void>;
+  capabilities: CapabilitiesResponseT;
+  capabilityStatus: 'loading' | 'known' | 'unknown';
 }): JSX.Element {
   const [profile, setProfile] = useState<AccountProfileT | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -154,6 +158,26 @@ export function AccountView({
             </div>
           </div>
         )}
+      </Card>
+
+      <Card className="space-y-3">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-surface-subtle text-brand-600 flex items-center justify-center shrink-0">
+            <Sparkles size={20} />
+          </div>
+          <div>
+            <h2 className="text-base font-bold text-ink">智能辅助</h2>
+            <p className="text-xs text-muted">
+              {capabilityStatus === 'loading'
+                ? '正在确认可用状态…'
+                : capabilityStatus === 'unknown'
+                  ? '状态未知，已按关闭处理；核心功能可正常使用。'
+                  : capabilities.assist.available
+                    ? `当前可用，共 ${capabilities.assist.capabilities.length} 项辅助能力。`
+                    : '当前未启用；归档、浏览和账户功能不受影响。'}
+            </p>
+          </div>
+        </div>
       </Card>
 
       {/* Session Management Card */}

@@ -14,6 +14,8 @@
 
 > **每个涉及数据的接口都必须经过 `person_access` 过滤。** 这不是可选的中间件,是安全边界。
 
+> **实现状态（2026-08-28）：** Core-0/P0–P4 端点已落地，精确请求/响应以 `packages/contracts` 和 `apps/api/src/routes` 为准。本文保留的早期示例只解释语义，不得用来绕过 strict Zod contract。AI 路由是可选 plugin 资格轨；`PROCESSING_MODE=off` 时 Core API 完整可用。
+
 ---
 
 ## 1. 账号与认证
@@ -257,11 +259,15 @@ POST /api/v1/documents/suggest-person
 ### 归人纠正
 
 ```
-POST /api/v1/documents/:id/reassign-person
+POST /api/v1/documents/:id/reassign
 ```
 
 ```json
-{ "person_id": "…", "reason": "上传时选错了" }
+{
+  "to_person_id": "…",
+  "reason": "上传时选错了",
+  "client_operation_id": "018f…"
+}
 ```
 
 写入 `audit_log`,并触发受影响 observation 的 `person_id` 级联更新。
@@ -338,13 +344,13 @@ POST   /api/v1/encounters/:id/documents   把文档归入就诊事件
 ### `GET /api/v1/search`
 
 ```
-?person_id=…&q=转氨酶&mode=hybrid&doc_type=lab_report&from=2022-01-01
+?person_id=…&q=转氨酶&mode=keyword&doc_type=lab_report&from=2022-01-01
 ```
 
 | 参数 | 说明 |
 |---|---|
 | `q` | 查询词 |
-| `mode` | `keyword` \| `semantic` \| `hybrid`(默认) |
+| `mode` | `keyword`(默认) \| `semantic` \| `hybrid`；后两者不可用时返回 `409 capability_unavailable` |
 | 其余 | 与 `/documents` 筛选参数一致 |
 
 ```json
@@ -367,50 +373,75 @@ POST   /api/v1/encounters/:id/documents   把文档归入就诊事件
 }
 ```
 
-**highlights 来自 `extraction.full_text`** —— 即使结构化提取失败,只要全文在,就能被找到。
+Core keyword 投影覆盖人工 metadata、encounter、context answer、observation、medication 和 timeline event，返回 `coverage=core_manual`。可选 OCR/semantic 命中必须显式标识 `core_plus_assist`，不得冒充 Core 覆盖。
 
 ---
 
 ## 6. 情境问答
 
 ```
-GET  /api/v1/context/templates/:doc_type          取当前模板(含版本)
+GET  /api/v1/context/templates                    模板 manifest
+GET  /api/v1/context/templates/:template_id/versions/:version
 POST /api/v1/context/sessions                     创建会话
+GET  /api/v1/context/sessions/:id
 POST /api/v1/context/sessions/:id/answers         提交回答(可批量)
 POST /api/v1/context/sessions/:id/complete
 GET  /api/v1/context/pending                      待补录的问题(当天推送用)
-POST /api/v1/uploads/presign-audio                取音频上传 URL
+POST /api/v1/context/sessions/:id/bind-document
+POST /api/v1/context/uploads/prepare
+POST /api/v1/context/uploads/:upload_id/presign
+POST /api/v1/context/uploads/:upload_id/finalize
+GET  /api/v1/context/uploads/:upload_id
+POST /api/v1/context/answers/:id/promote
 ```
 
 ### `POST /context/sessions/:id/answers`
 
 ```json
 {
+  "client_operation_id": "018f…",
+  "if_revision": 1,
   "answers": [
-    { "question_key": "fasting_status", "answer_type": "choice", "value_choice": "fasting" },
+    { "question_key": "fasting_status", "answer_type": "choice", "value": "fasting", "skipped": false },
     { "question_key": "collection_time", "answer_type": "datetime",
-      "value_datetime": "2024-03-15T08:15:00+08:00" },
-    { "question_key": "visit_reason", "answer_type": "audio", "audio_upload_id": "u_4h8n" },
-    { "question_key": "current_symptoms", "skipped": true }
+      "value": "2024-03-15T08:15:00+08:00", "skipped": false },
+    { "question_key": "visit_reason", "answer_type": "audio",
+      "value": { "upload_id": "018f…" }, "skipped": false },
+    { "question_key": "current_symptoms", "answer_type": "text", "value": null, "skipped": true }
   ]
 }
 ```
 
-转写异步进行;`GET /context/sessions/:id` 返回 `transcript` 与 `transcript_status`。
+音频/照片先安全 finalize 为 L1，再绑定回答；文字替代和全部跳过始终可用。`maps_to` 只预填；只有 `confirmed=true` 的 promote 才能创建 observation/medication，并保留 `context_answer_id` 来源。
 
 ---
 
 ## 7. 指标与趋势
 
 ```
-GET  /api/v1/people/:id/observations           原始观测值(可筛 concept_code)
-PATCH /api/v1/observations/:id                 人工修正(记 audit_log)
-POST /api/v1/observations/:id/confirm          确认无误
+GET  /api/v1/medical/concepts
+GET  /api/v1/people/:id/observations
+POST /api/v1/people/:id/observations::batch
+PATCH /api/v1/observations/:id
+POST /api/v1/observations/:id/archive
+GET  /api/v1/people/:id/observation-mapping-inbox
+POST /api/v1/people/:id/observation-mapping-inbox::resolve
 
 GET  /api/v1/people/:id/metric-groups
 POST /api/v1/people/:id/metric-groups
+PATCH /api/v1/metric-groups/:id
+POST /api/v1/metric-groups/:id/archive
 GET  /api/v1/metric-groups/:id/trend
-GET  /api/v1/people/:id/review-queue           待核查队列(低置信/校验失败)
+
+GET  /api/v1/people/:id/medications
+POST /api/v1/people/:id/medications::batch
+PATCH /api/v1/medications/:id
+POST /api/v1/medications/:id/archive
+
+GET  /api/v1/people/:id/timeline-events
+POST /api/v1/people/:id/timeline-events
+PATCH /api/v1/timeline-events/:id
+POST /api/v1/timeline-events/:id/archive
 ```
 
 ### `GET /metric-groups/:id/trend`
@@ -471,8 +502,15 @@ GET  /api/v1/people/:id/review-queue           待核查队列(低置信/校验�
 
 ```
 POST /api/v1/exports/visit-summary
+POST /api/v1/exports/preview
+GET  /api/v1/people/:person_id/exports
 GET  /api/v1/exports/:id                  轮询状态
+POST /api/v1/exports/:id/retry
 GET  /api/v1/exports/:id/download
+POST /api/v1/exports/:id/shares
+GET  /api/v1/exports/:id/shares
+DELETE /api/v1/exports/:id/shares/:share_id
+GET  /api/v1/shared/exports/:token         无账户的有期公开访问
 ```
 
 ```json
@@ -481,10 +519,13 @@ GET  /api/v1/exports/:id/download
   "metric_group_ids": ["…"],
   "from": "2021-01-01", "to": "2024-03-15",
   "include_events": true,        // 用药变更、住院、急性病时间轴
+  "include_undated_events": true,// 单独标注“日期未记录”，不伪造日期
   "include_originals": true,     // 附录:原件影像
   "format": "pdf"
 }
 ```
+
+editor 必须先 preview，再创建可恢复 job；历史保留冻结选择、renderer/font/content hash 和 stale 状态。viewer 只可看已完成历史/下载；只有 owner 可创建、查看和撤销分享。分享令牌为 256-bit 随机值，明文只在首次响应返回，服务端仅存 hash；过期/撤销/未知统一 404，响应 `private, no-store`。
 
 ### 单人档案 bundle 导出(ADR-045)
 
@@ -492,8 +533,7 @@ GET  /api/v1/exports/:id/download
 
 ```
 POST /api/v1/exports/person-bundle        { "person_id": "…" }
-GET  /api/v1/exports/:id                  轮询状态
-GET  /api/v1/exports/:id/download         zip(L1 子集,不含任何 derived)
+// 响应直接流式返回 zip(L1 子集,不含任何 derived)
 ```
 
 **导出内容的硬性约束:**
@@ -532,7 +572,7 @@ GET  /api/v1/exports/:id/download         zip(L1 子集,不含任何 derived)
 | 422 | `derivative_generation_failed` | 缩略图解码或缩放失败 |
 | 429 | `rate_limited` | |
 | 500 | `internal_error` | |
-| 503 | `ai_provider_unavailable` | **归档不受影响,仅提取延后** |
+| 503 | `capability_unavailable` | 可选辅助能力未部署；Core 归档、人工事实、趋势和导出不受影响 |
 
 ---
 

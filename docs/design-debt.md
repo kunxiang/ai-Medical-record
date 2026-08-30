@@ -9,7 +9,7 @@
 | D3 | **n=1 规则降级**:规则带 `evidence_scope`(机构/仪器/样本量);Tier 0 前提不成立时显式上报"防线未激活";`report_no` 去重降级为提示,**绝不自动拒收** | B6 | M5(第二家医院首份单据前) | 无 NO 列的单据不静默降级;撞号不丢档 |
 | D4 | **确认队列可用性**:模式级晋升(一次确认批量生效)、逐报告聚合确认视图、未确认时的渲染降级规则显式化 | B7 | M5 | 100 份冷启动的确认总耗时可接受 |
 | D5 | **长文档**:页级 full_text 与 embedding、搜索返回 page_no、checkup 分节模型(parent_document_id 或 sections[]) | C5 / A F7 | M4 | 新增 ≥15 页 fixture;搜索定位到页 |
-| D6 | **P4 一页纸样张**:用现有 fixture 数据手工排版;定义主序列选择 + 折叠规则(每指标取点数最多的维度组合为主线,其余降脚注) | C6 | M7 前 | 样张进 docs,作为"3 秒看懂 vs 医学正确碎片化"的调和基准 |
+| D6 | ~~P4 一页纸样张~~ **已清偿并由 P0–P4 reviewed spec 收敛**：监控组 item 保存显式完整 series selector，不再用“点数最多”猜主线；正式 renderer 首屏展开 3 条显式 series，超量/缺口显示计数。合成 PDF/PNG、canonical manifest 与 hash 已进入 `specs/p0-p4-core/evidence/`；真实医生可读性仍由 P4-12 单独门禁 | C6 / P0–P4 Review 002 | ~~M7 前~~ P4 | 样张可确定性重建、PDF 单页、PNG 1240×1754；3–5 名医生真实脱敏样例中位数 ≤3 秒后关闭 P4-12 |
 | D7 | **文档边界组装**:split / merge / move-page 接口;S1 输出边界建议(report_no / 页脚 / 表头变化);幂等撞车处理 | C7 | M2 | 6 张连拍混合单据可事后拆分,S3 布局不受影响 |
 | D8 | **ADR 合入 checklist**:每条新 ADR 合入时 grep 全仓库枚举 / 代码示例 / roadmap / fixtures 同步 | C9 / A F10 | 即刻生效 | 见 docs/README |
 | D9 | **单人导出 bundle 细则**:decisions 的共享词表类/个人相关类逐 decision_type 分类表;bundle schema 进 contracts;manifests 按人过滤回放的实现 | 二轮审核(ADR-045) | M8 前 | 单人导出演练:导出孩子的 bundle,档案完整(含改归进来的文档)且不含他人隐私 |

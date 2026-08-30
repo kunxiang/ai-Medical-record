@@ -12,7 +12,9 @@ account ──< person_access >── person ──< person_identifier
                                  │                     └──< context_session ──< context_answer
                                  │
                                  ├──< medication
-                                 └──< metric_group ──< metric_group_item
+                                 ├──< timeline_event
+                                 ├──< metric_group ──< metric_group_item
+                                 └──< export_job ──< export_share
 
 facility ──< encounter / document / observation
 
@@ -22,9 +24,12 @@ normalization_decision(独立 —— 按输入指纹缓存 AI 归一化判断,�
 **分层含义:**
 
 - **不可变层**:`document`、`document_page` —— 原件,写入后永不修改
-- **派生层**:`extraction`、`observation` —— 可重跑、可版本化
+- **事实层**:手工录入或人工接受的 `observation`、`medication`、`timeline_event` 是 L1，随写随 journal 双写
+- **派生层**:`extraction`、`processing_job/suggestion`、`search_entry`、确定性派生 observation 和导出 artifact —— 可重建、可版本化
 - **决策层**:`normalization_decision` —— AI 归一化判断的持久缓存,同指纹确定性重放
 - **人工层**:`context_answer`、`observation.review_status`、**已确认的归一化决策**、手动 observation、`metric_group`、person 编辑、归人裁决 —— 人的输入与确认,优先级高于机器,**不可从原件重建** → 写库事务内**双写追加 `people/{slug}/journal/`**(ADR-045,不是异步导出)
+
+> 2026-08-28 的 P0–P4 Core 物理表、约束、幂等台账、revision 与导出 lease 以 [`specs/p0-p4-core/specs/03_database.md`](../specs/p0-p4-core/specs/03_database.md) 和 Drizzle migration 为准。本文后续的历史扩展模型不得覆盖已实现的 Core 契约。
 
 ---
 

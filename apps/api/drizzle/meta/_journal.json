@@ -71,6 +71,69 @@
       "when": 1787734890650,
       "tag": "0009_cuddly_frightful_four",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787889387706,
+      "tag": "0010_core0_processing",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1787890737301,
+      "tag": "0011_p0_archive",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1787896086539,
+      "tag": "0012_p1_context",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1787901034969,
+      "tag": "0013_p2_observations",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1787901132046,
+      "tag": "0014_p2_page_origin",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1787901625506,
+      "tag": "0015_p2_mapping_fingerprint",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1787905272743,
+      "tag": "0016_p3_metric_groups",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1787907047128,
+      "tag": "0017_p4_facts",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1787909186928,
+      "tag": "0018_exotic_forge",
+      "breakpoints": true
     }
   ]
 }

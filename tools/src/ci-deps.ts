@@ -52,6 +52,36 @@ if (existsSync(aiPkgPath)) {
   if (aiImports.length) failures.push(`m2 B1: packages/ai 直接 import 服务端包:\n${aiImports.join('\n')}`);
 }
 
+// Core-0 C0-1/C0-6:从 API 主入口可达的本地模块不得加载 provider 包。
+// plugin-main.ts 是刻意分离的辅助进程入口，不属于这张模块图。
+{
+  const visited = new Set<string>();
+  const violations: string[] = [];
+  const visit = (file: string): void => {
+    const normalized = path.normalize(file);
+    if (visited.has(normalized) || !existsSync(normalized)) return;
+    visited.add(normalized);
+    const source = readFileSync(normalized, 'utf-8');
+    const imports = [
+      ...source.matchAll(/\b(?:import|export)\s+(?:type\s+)?(?:[^'";]*?\sfrom\s*)?['"]([^'"]+)['"]/g),
+      ...source.matchAll(/\bimport\(\s*['"]([^'"]+)['"]\s*\)/g),
+    ].map((match) => match[1]!);
+    for (const specifier of imports) {
+      if (specifier === '@amr/ai' || specifier.startsWith('@anthropic-ai/')) {
+        violations.push(`${path.relative(root, normalized)} -> ${specifier}`);
+      }
+      if (!specifier.startsWith('.')) continue;
+      const resolved = path.resolve(path.dirname(normalized), specifier.replace(/\.js$/, '.ts'));
+      visit(resolved);
+      visit(path.join(resolved, 'index.ts'));
+    }
+  };
+  visit(path.join(root, 'apps/api/src/main.ts'));
+  if (violations.length) {
+    failures.push(`Core-0 C0-1/C0-6:API 主进程加载 provider SDK:\n${violations.join('\n')}`);
+  }
+}
+
 // m2-99 B2: provider 默认模型 ID 只在 packages/ai/src/models.ts 出现。
 // 扫描范围排除 fixtures(录制盒内必然含模型名)与 docs(审核 #003 A8)。
 {
@@ -70,22 +100,23 @@ if (existsSync(aiPkgPath)) {
   if (hits.length) failures.push(`m2 B2: provider 默认模型 ID 只允许出现在 packages/ai/src/models.ts:\n${hits.join('\n')}`);
 }
 
-// m2-99 B10:M2 只做文档级抄写与归档，禁止提前写 observation 或引入单位换算。
+// m2-99 B10 + Core P2：AI/plugin 轨只能产生 suggestion，不得直接写入
+// Observation 事实或执行核心单位换算。人工 P2 服务和 packages/medical 是 Core。
 {
-  const sourceDirs = ['packages', 'apps', 'tools/src']
+  const pluginDirs = ['packages/ai/src', 'apps/api/src/jobs', 'apps/api/src/processing']
     .map((d) => path.join(root, d))
     .filter((d) => existsSync(d));
-  const observationWrites = sourceDirs.flatMap((d) =>
+  const observationWrites = pluginDirs.flatMap((d) =>
     grep('\\.(insert|update|delete)\\(observation\\)', d))
     .filter((line) => !line.includes('/tools/src/ci-deps.ts:'));
-  const unitConversions = sourceDirs.flatMap((d) =>
-    grep('convert(Unit|Measurement)|normalizeUnit|toCanonicalUnit|单位换算', d))
+  const unitConversions = pluginDirs.flatMap((d) =>
+    grep('convertTo(Si|Canonical)|convertUreaBun|convert(Unit|Measurement)|normalizeUnit|toCanonicalUnit', d))
     .filter((line) => !line.includes('/tools/src/ci-deps.ts:'));
   if (observationWrites.length) {
-    failures.push(`m2 B10:发现 observation 表写入:\n${observationWrites.join('\n')}`);
+    failures.push(`m2 B10:AI/plugin 路径直接写入 observation:\n${observationWrites.join('\n')}`);
   }
   if (unitConversions.length) {
-    failures.push(`m2 B10:发现单位换算调用:\n${unitConversions.join('\n')}`);
+    failures.push(`m2 B10:AI/plugin 路径执行核心单位换算:\n${unitConversions.join('\n')}`);
   }
 }
 

@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { EncounterProposal, FacilityProposal, type DocumentListItemT, type NormalizationDecisionT } from '@amr/contracts';
+import {
+  EncounterProposal, FacilityProposal,
+  type DateFieldT, type DocumentListItemT, type EncounterT,
+  type NormalizationDecisionT, type SearchResultT,
+} from '@amr/contracts';
 import {
   AlertTriangle, Archive, Building2, CalendarDays, Check, ChevronLeft, ChevronRight, Clock3,
-  FileImage, FileText, LoaderCircle, MapPin, Maximize2, RotateCcw, RotateCw, ShieldCheck, Trash2,
-  UploadCloud, UserRoundCog, X,
+  Download, FileImage, FileText, LoaderCircle, MapPin, Maximize2, RotateCcw,
+  RotateCw, Search, ShieldCheck, SlidersHorizontal, Trash2, UploadCloud, UserRoundCog, X,
 } from 'lucide-react';
 import { uuidv7 } from 'uuidv7';
 import { api, auth, derivativeUrl } from '../../api/client.js';
@@ -17,8 +21,18 @@ import { Badge, NormalizationStateBadge } from '../../ui/Badge.js';
 import { Alert } from '../../ui/Alert.js';
 import { EmptyState } from '../../ui/EmptyState.js';
 import { cn } from '../../ui/cn.js';
+import { Input } from '../../ui/Input.js';
+import { Select } from '../../ui/Select.js';
+import { DocumentDetailDialog } from './DocumentDetailDialog.js';
+import { LegacyMetadataInbox } from './LegacyMetadataInbox.js';
 
 type Doc = DocumentListItemT;
+
+export interface BrowseSourceTarget {
+  documentId: string;
+  pageNo: number;
+  bbox: { x: number; y: number; width: number; height: number } | null;
+}
 
 const DOC_TYPE_LABEL: Record<string, string> = {
   lab_report: '检验报告',
@@ -53,11 +67,19 @@ export function BrowseView({
   people,
   onSelect,
   queue,
+  assistAvailable,
+  onOpenContext,
+  sourceTarget,
+  onSourceConsumed,
 }: {
   person: Person | null;
   people: Person[];
   onSelect: (person: Person) => void;
   queue: CaptureRecord[];
+  assistAvailable: boolean;
+  onOpenContext: (clientDocumentId: string) => void;
+  sourceTarget?: BrowseSourceTarget | null;
+  onSourceConsumed?: () => void;
 }): JSX.Element {
   const [docs, setDocs] = useState<Doc[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -70,6 +92,24 @@ export function BrowseView({
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [documentAction, setDocumentAction] = useState(false);
+  const [detailDocumentId, setDetailDocumentId] = useState<string | null>(null);
+  const [detailSourceTarget, setDetailSourceTarget] = useState<BrowseSourceTarget | null>(null);
+  const [queryDraft, setQueryDraft] = useState('');
+  const [filters, setFilters] = useState<{
+    q: string; dateField: DateFieldT; from: string; to: string; docType: string; encounterId: string;
+  }>({ q: '', dateField: 'best_available', from: '', to: '', docType: '', encounterId: '' });
+  const [encounters, setEncounters] = useState<EncounterT[]>([]);
+  const [searchResults, setSearchResults] = useState<SearchResultT[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [bundleLoading, setBundleLoading] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    if (!sourceTarget || sourceTarget.documentId === '') return;
+    setDetailSourceTarget(sourceTarget);
+    setDetailDocumentId(sourceTarget.documentId);
+    onSourceConsumed?.();
+  }, [sourceTarget, onSourceConsumed]);
 
   const load = useCallback(
     async (reset: boolean) => {
@@ -81,6 +121,12 @@ export function BrowseView({
           person_id: person.id,
           limit: 20,
           include_archived: showArchived,
+          date_field: filters.dateField,
+          ...(filters.q ? { q: filters.q } : {}),
+          ...(filters.from ? { from: filters.from } : {}),
+          ...(filters.to ? { to: filters.to } : {}),
+          ...(filters.docType ? { doc_type: filters.docType as Doc['doc_type'] } : {}),
+          ...(filters.encounterId ? { encounter_id: filters.encounterId } : {}),
           ...(reset ? {} : cursor ? { cursor } : {}),
         });
         setDocs((prev) => (reset ? res.documents : [...prev, ...res.documents]));
@@ -91,7 +137,7 @@ export function BrowseView({
         setLoading(false);
       }
     },
-    [person, cursor, loading, showArchived],
+    [person, cursor, loading, showArchived, filters],
   );
 
   useEffect(() => {
@@ -100,7 +146,65 @@ export function BrowseView({
     setViewer(null);
     void load(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [person?.id, showArchived]);
+  }, [person?.id, showArchived, filters, refreshKey]);
+
+  useEffect(() => {
+    if (!person) {
+      setEncounters([]);
+      return;
+    }
+    let cancelled = false;
+    void api.encounters(person.id).then(
+      (result) => { if (!cancelled) setEncounters(result.encounters); },
+      () => { if (!cancelled) setEncounters([]); },
+    );
+    return () => { cancelled = true; };
+  }, [person?.id, refreshKey]);
+
+  useEffect(() => {
+    if (!person || !filters.q) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setSearchLoading(true);
+    void api.search({
+      person_id: person.id,
+      q: filters.q,
+      mode: 'keyword',
+      limit: 30,
+      ...(filters.from ? { from: filters.from } : {}),
+      ...(filters.to ? { to: filters.to } : {}),
+      ...(filters.docType ? { doc_type: filters.docType as Doc['doc_type'] } : {}),
+      ...(filters.encounterId ? { encounter_id: filters.encounterId } : {}),
+    }).then(
+      (result) => { if (!cancelled) setSearchResults(result.results); },
+      (cause: unknown) => { if (!cancelled) setError(cause instanceof Error ? cause.message : '检索失败'); },
+    ).finally(() => { if (!cancelled) setSearchLoading(false); });
+    return () => { cancelled = true; };
+  }, [person?.id, filters]);
+
+  const downloadBundle = useCallback(async () => {
+    if (!person) return;
+    setBundleLoading(true);
+    setError(null);
+    try {
+      const result = await api.downloadPersonBundle(person.id);
+      const url = URL.createObjectURL(result.blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = result.filename;
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '档案包下载失败');
+    } finally {
+      setBundleLoading(false);
+    }
+  }, [person]);
 
   useEffect(() => {
     if (!person) {
@@ -191,6 +295,7 @@ export function BrowseView({
             : current.filter((item) => item.id !== doc.id),
         );
         setViewer(null);
+        setDetailDocumentId(null);
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : '文档归档操作失败');
       } finally {
@@ -232,6 +337,7 @@ export function BrowseView({
         await api.reassignDocument(doc.id, target.id, reason.trim(), uuidv7());
         setDocs((current) => current.filter((item) => item.id !== doc.id));
         setViewer(null);
+        setDetailDocumentId(null);
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : '归人纠正失败');
       } finally {
@@ -282,9 +388,10 @@ export function BrowseView({
 
   const groups = new Map<string, Doc[]>();
   for (const d of docs) {
-    const list = groups.get(d.capture_date) ?? [];
+    const groupDate = d.dates.selected_date ?? d.capture_date;
+    const list = groups.get(groupDate) ?? [];
     list.push(d);
-    groups.set(d.capture_date, list);
+    groups.set(groupDate, list);
   }
   const queuedForPerson = queue.filter((q) => q.person_id === person.id && q.state !== 'draft');
   const facilityDecisions = decisions.filter((item) => item.kind === 'facility');
@@ -302,11 +409,21 @@ export function BrowseView({
         title={`${person.display_name} 的档案`}
         description={
           docs.length > 0
-            ? `已加载 ${docs.length} 份记录，按采集日期整理。`
+            ? `已加载 ${docs.length} 份记录，按所选日期语义整理。`
             : '按时间浏览已安全归档的医疗记录。'
         }
         action={
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void downloadBundle()}
+              loading={bundleLoading}
+              iconLeft={<Download size={14} />}
+              className="rounded-xl"
+            >
+              导出档案包
+            </Button>
             <Button
               variant={showArchived ? 'soft' : 'outline'}
               size="sm"
@@ -353,6 +470,97 @@ export function BrowseView({
         })}
       </div>
 
+      <Card className="space-y-4" data-testid="archive-filters">
+        <form
+          className="flex flex-col gap-2 sm:flex-row"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setFilters((current) => ({ ...current, q: queryDraft.trim() }));
+          }}
+        >
+          <Input
+            value={queryDraft}
+            onChange={(event) => setQueryDraft(event.target.value)}
+            iconLeft={<Search size={16} />}
+            placeholder="搜索标题、机构、科室、备注或就诊"
+            aria-label="搜索档案"
+          />
+          <Button type="submit" variant="primary" iconLeft={<Search size={15} />}>搜索</Button>
+          {(filters.q || filters.from || filters.to || filters.docType || filters.encounterId || filters.dateField !== 'best_available') && (
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setQueryDraft('');
+                setFilters({ q: '', dateField: 'best_available', from: '', to: '', docType: '', encounterId: '' });
+              }}
+            >
+              清除
+            </Button>
+          )}
+        </form>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+          <Select value={filters.dateField} onChange={(event) => setFilters((current) => ({ ...current, dateField: event.target.value as DateFieldT }))} iconLeft={<SlidersHorizontal size={15} />} aria-label="日期语义">
+            <option value="best_available">最佳可用日期</option>
+            <option value="sampled">采样日期</option>
+            <option value="reported">报告日期</option>
+            <option value="encounter">就诊日期</option>
+            <option value="capture">采集日期</option>
+          </Select>
+          <Input type="date" value={filters.from} onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))} aria-label="开始日期" />
+          <Input type="date" value={filters.to} onChange={(event) => setFilters((current) => ({ ...current, to: event.target.value }))} aria-label="结束日期" />
+          <Select value={filters.docType} onChange={(event) => setFilters((current) => ({ ...current, docType: event.target.value }))} aria-label="文档类型">
+            <option value="">全部文档类型</option>
+            {Object.entries(DOC_TYPE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </Select>
+          <Select value={filters.encounterId} onChange={(event) => setFilters((current) => ({ ...current, encounterId: event.target.value }))} aria-label="就诊筛选">
+            <option value="">全部就诊</option>
+            {encounters.map((item) => <option key={item.id} value={item.id}>{item.occurred_on} · {item.department || ENCOUNTER_TYPE_LABEL[item.encounter_type]}</option>)}
+          </Select>
+        </div>
+      </Card>
+
+      <LegacyMetadataInbox personId={person.id} onChanged={() => setRefreshKey((value) => value + 1)} />
+
+      {filters.q && (
+        <Card className="space-y-3" data-testid="search-results">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="font-bold text-ink">“{filters.q}”的检索结果</h2>
+              <p className="text-xs text-muted">仅检索人工信息和已确认事实，不混入未确认建议。</p>
+            </div>
+            <Badge variant="neutral">{searchLoading ? '检索中…' : `${searchResults.length} 条`}</Badge>
+          </div>
+          {searchLoading ? (
+            <p className="flex items-center gap-2 rounded-xl bg-surface-subtle p-3 text-sm text-muted">
+              <LoaderCircle className="animate-spin" size={16} aria-hidden="true" />
+              正在检索人工信息和已确认事实…
+            </p>
+          ) : searchResults.length === 0 ? (
+            <p className="rounded-xl bg-surface-subtle p-3 text-sm text-muted">没有匹配的人工档案或就诊记录。</p>
+          ) : (
+            <div className="divide-y divide-line rounded-xl border border-line bg-white">
+              {searchResults.map((result) => (
+                <button
+                  key={`${result.entity_type}-${result.entity_id}`}
+                  type="button"
+                  className="flex w-full items-center justify-between gap-3 p-3 text-left hover:bg-brand-50/50"
+                  onClick={() => {
+                    if (result.document_id) setDetailDocumentId(result.document_id);
+                    else if (result.entity_type === 'encounter') setFilters((current) => ({ ...current, encounterId: result.entity_id, q: '' }));
+                  }}
+                >
+                  <span>
+                    <strong className="block text-sm text-ink">{result.title}</strong>
+                    <span className="text-xs text-muted">{result.occurred_on ?? '日期未记录'} · {result.entity_type === 'document' ? '文档' : '就诊'}</span>
+                  </span>
+                  <ChevronRight size={16} className="text-muted" />
+                </button>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
+
       {/* Facility Normalization Review */}
       {(reviewLoading || facilityDecisions.length > 0) && (
         <Card className="space-y-4" data-testid="facility-review">
@@ -363,7 +571,11 @@ export function BrowseView({
               </div>
               <div>
                 <h2 className="text-base font-bold text-ink">机构名称审核</h2>
-                <p className="text-xs text-muted">AI 只提出映射建议；确认后才会成为可回放的人工决定。</p>
+                <p className="text-xs text-muted">
+                  {assistAvailable
+                    ? '智能辅助只提出映射建议；确认后才会成为可回放的人工决定。'
+                    : '这里保留已有建议；当前不会生成新建议，人工审核仍可继续。'}
+                </p>
               </div>
             </div>
             {reviewLoading && <LoaderCircle className="animate-spin text-brand-600" size={18} aria-label="加载中" />}
@@ -526,8 +738,8 @@ export function BrowseView({
         </Card>
       )}
 
-      {reviewError && (
-        <Alert variant="danger">
+      {reviewError && assistAvailable && (
+        <Alert variant="warning">
           <span>{reviewError}</span>
         </Alert>
       )}
@@ -580,8 +792,8 @@ export function BrowseView({
               <button
                 key={d.id}
                 type="button"
-                onClick={() => setViewer({ doc: d, page: 1 })}
-                aria-label={`查看${d.facility_name ?? d.original_filename ?? '医疗记录'}大图`}
+                onClick={() => setDetailDocumentId(d.id)}
+                aria-label={`查看${d.facility_name ?? d.original_filename ?? '医疗记录'}详情`}
                 data-testid={`doc-${d.short_id}`}
                 className={cn(
                   'group flex items-start gap-3.5 p-3.5 rounded-2xl border text-left transition-all duration-200 cursor-pointer',
@@ -694,10 +906,46 @@ export function BrowseView({
           variant="card"
           icon={<Archive size={32} />}
           title="还没有已上传的文档"
-          description="切换到「采集」，拍照或导入第一份医疗记录。"
+          description="使用右下角采集按钮，拍照或导入第一份医疗记录。"
           data-testid="browse-empty"
         />
       )}
+
+      <DocumentDetailDialog
+        documentId={detailDocumentId}
+        person={person}
+        summary={docs.find((item) => item.id === detailDocumentId) ?? null}
+        initialPage={detailSourceTarget?.documentId === detailDocumentId ? detailSourceTarget.pageNo : undefined}
+        highlightBbox={detailSourceTarget?.documentId === detailDocumentId ? detailSourceTarget.bbox : null}
+        onClose={() => {
+          setDetailDocumentId(null);
+          setDetailSourceTarget(null);
+        }}
+        onChanged={() => setRefreshKey((value) => value + 1)}
+        actionBusy={documentAction}
+        onOpenFullscreen={() => {
+          const doc = docs.find((item) => item.id === detailDocumentId);
+          if (!doc) return;
+          setDetailDocumentId(null);
+          setViewer({ doc, page: 1 });
+        }}
+        onAcknowledge={() => {
+          const doc = docs.find((item) => item.id === detailDocumentId);
+          if (doc) void acknowledgePersonCheck(doc);
+        }}
+        onReassign={() => {
+          const doc = docs.find((item) => item.id === detailDocumentId);
+          if (doc) void reassignDocument(doc);
+        }}
+        onArchive={() => {
+          const doc = docs.find((item) => item.id === detailDocumentId);
+          if (doc) void toggleArchive(doc);
+        }}
+        onOpenContext={(clientDocumentId) => {
+          setDetailDocumentId(null);
+          onOpenContext(clientDocumentId);
+        }}
+      />
 
       {/* Full-Size Document Viewer Modal */}
       {viewer &&
@@ -818,8 +1066,8 @@ export function BrowseView({
                 {viewer.doc.first_page?.mime_type === 'application/pdf' ? (
                   <div className="flex flex-col items-center justify-center gap-3 p-8 rounded-3xl bg-white/10 text-white max-w-sm text-center">
                     <FileText size={48} className="text-brand-300" />
-                    <strong className="text-lg font-bold">PDF 大图预览即将支持</strong>
-                    <span className="text-xs text-white/70">当前可确认文件已经安全归档。</span>
+                    <strong className="text-lg font-bold">PDF 请在文档详情中查看</strong>
+                    <span className="text-xs text-white/70">详情页提供浏览器原件预览、新标签打开和下载。</span>
                   </div>
                 ) : (
                   <img

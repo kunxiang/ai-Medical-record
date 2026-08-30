@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0",
+  "environment": "填写域名、build/commit 与测试日期",
+  "processing_mode": "off",
+  "recorded_at": "2026-08-28T00:00:00Z",
+  "gates": [
+    { "id": "P0-owner-ui", "status": "pending", "tester_id": "owner", "device": "desktop + mobile", "duration_seconds": null, "background_seconds": null, "evidence_refs": [], "notes": "桌面/手机、字段冲突合并" },
+    { "id": "P0-11", "status": "pending", "tester_id": "owner", "device": "desktop or mobile", "duration_seconds": null, "background_seconds": null, "evidence_refs": [], "notes": "已知旧文档定位 <60s" },
+    { "id": "P1-6", "status": "pending", "tester_id": "owner", "device": "iOS Safari or Android Chrome", "duration_seconds": null, "background_seconds": null, "evidence_refs": [], "notes": "拒绝麦克风后改用文字且草稿不丢" },
+    { "id": "P1-10", "status": "pending", "tester_id": "owner", "device": "mobile", "duration_seconds": null, "background_seconds": null, "evidence_refs": [], "notes": "采集+3 点选+2 文字/语音入口 <90s" },
+    { "id": "P2-10-desktop", "status": "pending", "tester_id": "owner", "device": "desktop", "duration_seconds": null, "background_seconds": null, "evidence_refs": [], "notes": "10 行 ≤180s；每行重复字段 ≤2 次" },
+    { "id": "P2-10-mobile", "status": "pending", "tester_id": "owner", "device": "mobile", "duration_seconds": null, "background_seconds": null, "evidence_refs": [], "notes": "10 行 ≤300s；每行重复字段 ≤2 次" },
+    { "id": "P3-owner-ui", "status": "pending", "tester_id": "owner", "device": "desktop + mobile", "duration_seconds": null, "background_seconds": null, "evidence_refs": [], "notes": "0/1/多点、不可比、来源回链" },
+    { "id": "P4-11", "status": "pending", "tester_id": "owner", "device": "desktop or mobile", "duration_seconds": null, "background_seconds": null, "evidence_refs": [], "notes": "仅记录用户操作时间 ≤30s；后台渲染另记" },
+    { "id": "P4-artifact-review", "status": "pending", "tester_id": "owner", "device": "PDF viewer + image viewer", "duration_seconds": null, "background_seconds": null, "evidence_refs": [], "notes": "PDF/PNG 人员、范围、最新值、变化、来源、事件、缺口一致" },
+    { "id": "release-log-redaction", "status": "pending", "tester_id": "operator", "device": "deployment logs", "duration_seconds": null, "background_seconds": null, "evidence_refs": [], "notes": "日志不含 share token、person 名称或原文件名" }
+  ],
+  "doctor_trials": []
+}

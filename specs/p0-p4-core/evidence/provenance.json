@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0",
+  "synthetic": true,
+  "contains_real_person_data": false,
+  "purpose": "P4-11/P4-12 layout and readability preflight only; not a medical example",
+  "renderer_id": "medireco-visit-summary",
+  "renderer_version": "1.0.0",
+  "font_id": "noto-sans-sc-chinese-simplified-400@5.2.8",
+  "font_manifest_hash": "8f5c235681f51959730a78e0badae22ee6e859a97eb0487c07a707a1a5f8b05e",
+  "artifacts": [
+    {
+      "file": "visit-summary-synthetic.pdf",
+      "format": "pdf",
+      "sha256": "061dae7091487e9dd3f8ef5179cb0ddbb6bcd5222386f441996eeb99fc7e650f",
+      "content_hash": "0c2e6d57b158f5ca66cfefafbe65463a7dcb9a4a64d5ed8bbd9b340cb44f174c",
+      "byte_size": 34675
+    },
+    {
+      "file": "visit-summary-synthetic.png",
+      "format": "png",
+      "sha256": "07c91ca3ea359ab1da615a61bea59fbf2d3fc2065aed8bf80bf2f181f7273c78",
+      "content_hash": "da39c3279c83f467f04367d915c6a08d86ca05f3cd6122d00cf5bec1482fd451",
+      "byte_size": 167022
+    }
+  ]
+}

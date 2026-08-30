@@ -1,6 +1,9 @@
 // spec m1-99 §0.1:测试注入面。仅 VITE_M1_TEST_HOOKS=1 构建暴露;
 // 生产构建里本模块的调用点被 tree-shake(CI 断言产物不含 __amr)。
-import { allCaptures, db, getCapture } from './offline/db.js';
+import {
+  allCaptures, allContextSessions, contextAnswersForSession, contextMediaForSession,
+  db, getCapture, getContextSession, putContextMedia, putContextSession, recoverAfterRestart,
+} from './offline/db.js';
 import { appendDraftPage, finalizeDraft, preparePage, reassignQueued } from './offline/capture.js';
 import { tick } from './offline/queue.js';
 import { setPause, type PauseSpec } from './offline/pause.js';
@@ -119,9 +122,34 @@ export function installTestHooks(deps: {
       await tick('test');
       deps.notifyChanged();
     },
+    async contextSnapshot() {
+      const d = await db();
+      const sessions = await allContextSessions();
+      return {
+        version: d.version,
+        stores: [...d.objectStoreNames],
+        template_count: await d.count('context_templates'),
+        sessions,
+        answers: (await Promise.all(sessions.map((session) => contextAnswersForSession(session.id)))).flat(),
+        media: (await Promise.all(sessions.map((session) => contextMediaForSession(session.id)))).flat()
+          .map((item) => ({ ...item, blob: { size: item.blob.size, type: item.blob.type } })),
+      };
+    },
+    async forceContextRecovery(sessionId: string) {
+      const session = await getContextSession(sessionId);
+      if (!session) throw new Error('情境记录不存在');
+      await putContextSession({ ...session, sync_state: 'syncing' });
+      const media = await contextMediaForSession(sessionId);
+      for (const item of media) await putContextMedia({ ...item, state: 'pending_finalize' });
+      return recoverAfterRestart();
+    },
     async clearAll() {
       const d = await db();
-      await Promise.all([d.clear('captures'), d.clear('blobs'), d.clear('people_cache'), d.clear('kv')]);
+      await Promise.all([
+        d.clear('captures'), d.clear('blobs'), d.clear('people_cache'), d.clear('kv'),
+        d.clear('context_templates'), d.clear('context_sessions'), d.clear('context_answers'),
+        d.clear('context_media'), d.clear('observation_drafts'),
+      ]);
       deps.notifyChanged();
     },
   };

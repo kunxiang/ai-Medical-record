@@ -23,7 +23,7 @@ services:
       MINIO_KMS_SECRET_KEY: amr-kms-key:c2VjcmV0LWtleS1mb3ItbTAtYWNjZXB0YW5jZS0wMDE=
       # MinIO 未实现 PutBucketCors(S3 API 返回 501),CORS 只能由服务端配置提供
       # (m1/CHANGES #2)。生产用 AWS S3 时改由 provision-bucket 的 PutBucketCors 承担。
-      MINIO_API_CORS_ALLOW_ORIGIN: "http://localhost:5173,http://127.0.0.1:5173"
+      MINIO_API_CORS_ALLOW_ORIGIN: "${WEB_ORIGIN:-http://localhost:5173}"
     network_mode: host
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]

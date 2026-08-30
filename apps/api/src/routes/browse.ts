@@ -1,14 +1,17 @@
-import { and, desc, eq, gte, lte, or, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, ilike, inArray, lte, or, lt, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   CaptureDiscardRequest, CaptureDiscardResponse, DocumentListQuery, DocumentListResponse,
-  Uuid, decodeCursor, encodeCursor,
+  Uuid, decodeDocumentCursor, encodeDocumentCursor,
 } from '@amr/contracts';
 import { serverTimestamp } from '@amr/storage';
 import { requireDocumentAccess, requirePersonAccess } from '../access.js';
 import { db } from '../db/client.js';
-import { captureDiscardEvent, document, documentPage, facility, person } from '../db/schema.js';
+import {
+  captureDiscardEvent, document, documentManualMetadata, documentPage, encounter,
+  facility, person, processingSuggestion,
+} from '../db/schema.js';
 import { defineRoute } from '../define-route.js';
 import { ApiError, notFound } from '../errors.js';
 import { ensureDerivative, type Variant } from '../derivatives.js';
@@ -26,49 +29,95 @@ export function registerBrowseRoutes(app: FastifyInstance): void {
     handler: async ({ input, accountId }) => {
       await requirePersonAccess(accountId, input.person_id, 'viewer');
 
+      const selectedDate = input.date_field === 'sampled' ? sql<string>`${documentManualMetadata.sampledOn}`
+        : input.date_field === 'reported' ? sql<string>`${documentManualMetadata.reportedOn}`
+        : input.date_field === 'encounter' ? sql<string>`${encounter.occurredOn}`
+        : input.date_field === 'capture' ? sql<string>`${document.captureDate}`
+        : sql<string>`coalesce(${documentManualMetadata.sampledOn}, ${documentManualMetadata.reportedOn}, ${encounter.occurredOn}, ${document.captureDate})`;
       const conds = [eq(document.personId, input.person_id)];
+      if (input.from || input.to) conds.push(sql`${selectedDate} is not null`);
+      if (input.from) conds.push(gte(selectedDate, input.from));
+      if (input.to) conds.push(lte(selectedDate, input.to));
 
-      // m2-01 §3.2:from/to 按 date_field 选择列。
-      // ★ A31 的边界:所选列为 NULL 的文档**一律不入选**,无论 from/to 如何 ——
-      //   否则"按采样日筛选"会把一堆还没跑过 S1 的文档也带出来,而它们的采样日根本未知。
-      const dateCol =
-        input.date_field === 'sampled_on' ? document.sampledOn
-        : input.date_field === 'reported_on' ? document.reportedOn
-        : document.captureDate;
-      if (input.date_field !== 'capture_date' && (input.from || input.to)) {
-        conds.push(sql`${dateCol} is not null`);
+      if (input.encounter_id) conds.push(eq(document.encounterId, input.encounter_id));
+      if (input.doc_type) {
+        conds.push(sql`coalesce(${documentManualMetadata.docType}, 'unknown') = ${input.doc_type}`);
       }
-      if (input.from) conds.push(gte(dateCol, input.from));
-      if (input.to) conds.push(lte(dateCol, input.to));
-
-      if (input.doc_type) conds.push(eq(document.docType, input.doc_type));
-      if (input.facility_id) conds.push(eq(document.facilityId, input.facility_id));
+      if (input.facility_id) {
+        conds.push(and(
+          sql`${documentManualMetadata.fieldProvenance} ? 'facility_id'`,
+          eq(documentManualMetadata.facilityId, input.facility_id),
+        )!);
+      }
+      if (input.department) conds.push(eq(documentManualMetadata.department, input.department));
+      if (input.q) {
+        const pattern = `%${input.q.replaceAll('%', '\\%').replaceAll('_', '\\_')}%`;
+        conds.push(or(
+          ilike(document.originalFilename, pattern), ilike(documentManualMetadata.title, pattern),
+          ilike(documentManualMetadata.note, pattern), ilike(documentManualMetadata.department, pattern),
+          ilike(documentManualMetadata.facilityNameRaw, pattern),
+        )!);
+      }
       if (input.person_check) conds.push(eq(document.personCheck, input.person_check));
       if (input.acked === false) conds.push(sql`${document.personCheckAckAt} is null`);
       if (input.acked === true) conds.push(sql`${document.personCheckAckAt} is not null`);
       // 软删除默认过滤(m2-06 §1.3)
       if (!input.include_archived) conds.push(sql`${document.archivedAt} is null`);
       if (input.cursor) {
-        let c: { capturedAt: string; documentId: string };
+        let c: ReturnType<typeof decodeDocumentCursor>;
         try {
-          c = decodeCursor(input.cursor);
+          c = decodeDocumentCursor(input.cursor);
         } catch {
           throw new ApiError('validation_failed', '游标无效');
         }
-        // (captured_at, id) 严格小于游标 —— 与排序键一致
-        conds.push(
-          or(
-            lt(document.capturedAt, new Date(c.capturedAt)),
-            and(eq(document.capturedAt, new Date(c.capturedAt)), lt(document.id, c.documentId)),
-          )!,
-        );
+        if (c.dateField !== input.date_field) throw new ApiError('validation_failed', '游标与日期语义不一致');
+        const capturedAt = new Date(c.capturedAt);
+        conds.push(c.selectedDate === null
+          ? and(sql`${selectedDate} is null`, or(
+              lt(document.capturedAt, capturedAt),
+              and(eq(document.capturedAt, capturedAt), lt(document.id, c.documentId)),
+            )!)!
+          : or(
+              sql`${selectedDate} < ${c.selectedDate}`,
+              sql`${selectedDate} is null`,
+              and(eq(selectedDate, c.selectedDate), or(
+                lt(document.capturedAt, capturedAt),
+                and(eq(document.capturedAt, capturedAt), lt(document.id, c.documentId)),
+              )!),
+            )!);
       }
 
       const rows = await db
-        .select()
+        .select({
+          id: document.id, shortId: document.shortId, personId: document.personId,
+          encounterId: document.encounterId, capturedAt: document.capturedAt,
+          captureDate: document.captureDate, pageCount: document.pageCount,
+          status: document.status, originalFilename: document.originalFilename,
+          personCheck: document.personCheck, personCheckAckAt: document.personCheckAckAt,
+          archivedAt: document.archivedAt,
+          manualDocType: documentManualMetadata.docType,
+          sampledOn: documentManualMetadata.sampledOn,
+          reportedOn: documentManualMetadata.reportedOn,
+          manualFacilityId: documentManualMetadata.facilityId,
+          facilityNameRaw: documentManualMetadata.facilityNameRaw,
+          department: documentManualMetadata.department,
+          title: documentManualMetadata.title, note: documentManualMetadata.note,
+          fieldProvenance: documentManualMetadata.fieldProvenance,
+          revision: documentManualMetadata.revision,
+          latestEncounterOn: encounter.occurredOn,
+          selectedDate,
+          assistSuggestionCount: sql<number>`(
+            select count(*)::int from ${processingSuggestion}
+            where ${processingSuggestion.subjectType} = 'document'
+              and ${processingSuggestion.subjectId} = ${document.id}::text
+              and ${processingSuggestion.state} in ('proposed', 'partially_accepted')
+          )`,
+        })
         .from(document)
+        .leftJoin(documentManualMetadata, eq(documentManualMetadata.documentId, document.id))
+        .leftJoin(encounter, eq(encounter.id, document.encounterId))
         .where(and(...conds))
-        .orderBy(desc(document.capturedAt), desc(document.id))
+        .orderBy(sql`${selectedDate} desc nulls last`, desc(document.capturedAt), desc(document.id))
         .limit(input.limit + 1);
 
       const page = rows.slice(0, input.limit);
@@ -76,19 +125,17 @@ export function registerBrowseRoutes(app: FastifyInstance): void {
         ? await db
             .select({ documentId: documentPage.documentId, pageNo: documentPage.pageNo, mimeType: documentPage.mimeType })
             .from(documentPage)
-            .where(and(
-              eq(documentPage.pageNo, 1),
-              sql`${documentPage.documentId} in ${sql.raw(`(${page.map((d) => `'${d.id}'`).join(',')})`)}`,
-            ))
+            .where(and(eq(documentPage.pageNo, 1), inArray(documentPage.documentId, page.map((d) => d.id))))
         : [];
       const fpByDoc = new Map(firstPages.map((f) => [f.documentId, f]));
 
       // 机构名:归一后才有,未归一时为 null
-      const facilityIds = [...new Set(page.map((d) => d.facilityId).filter((x): x is string => !!x))];
+      const facilityIds = [...new Set(page.map((d) => d.manualFacilityId)
+        .filter((x): x is string => !!x))];
       const facilities = facilityIds.length
         ? await db.select({ id: facility.id, name: facility.name })
             .from(facility)
-            .where(sql`${facility.id} in ${sql.raw(`(${facilityIds.map((f) => `'${f}'`).join(',')})`)}`)
+            .where(inArray(facility.id, facilityIds))
         : [];
       const facilityById = new Map(facilities.map((f) => [f.id, f.name]));
 
@@ -96,23 +143,59 @@ export function registerBrowseRoutes(app: FastifyInstance): void {
       return {
         documents: page.map((d) => {
           const fp = fpByDoc.get(d.id);
+          const provenance = (d.fieldProvenance ?? {}) as Record<string, {
+            source?: 'manual' | 'accepted_suggestion'; suggestion_id?: string | null;
+          }>;
+          const effective = <T>(field: string, manualValue: T | null, fallback: T | null) => {
+            const entry = provenance[field];
+            return entry
+              ? { value: manualValue, source: entry.source ?? 'manual', suggestion_id: entry.suggestion_id ?? null }
+              : { value: fallback, source: 'capture_fallback' as const, suggestion_id: null };
+          };
+          const facilityName = d.manualFacilityId
+            ? facilityById.get(d.manualFacilityId) ?? d.facilityNameRaw
+            : d.facilityNameRaw;
+          const effectiveMetadata = {
+            doc_type: effective('doc_type', d.manualDocType, 'unknown' as const),
+            sampled_on: effective('sampled_on', d.sampledOn, null),
+            reported_on: effective('reported_on', d.reportedOn, null),
+            facility_name: effective(
+              provenance.facility_id ? 'facility_id' : 'facility_name_raw', facilityName, facilityName,
+            ),
+            department: effective('department', d.department, null),
+            title: effective('title', d.title, d.originalFilename),
+            note: effective('note', d.note, null),
+          };
           return {
             id: d.id, short_id: d.shortId, person_id: d.personId,
             capture_date: d.captureDate, captured_at: d.capturedAt.toISOString(),
-            page_count: d.pageCount, doc_type: d.docType, status: d.status,
+            page_count: d.pageCount, doc_type: effectiveMetadata.doc_type.value ?? 'unknown', status: d.status,
             original_filename: d.originalFilename,
             first_page: fp ? { page_no: fp.pageNo, mime_type: fp.mimeType } : null,
-            // ── M2 增量 ──
-            doc_type_confidence: d.docTypeConfidence === null ? null : Number(d.docTypeConfidence),
-            sampled_on: d.sampledOn, reported_on: d.reportedOn,
-            facility_name: d.facilityId ? facilityById.get(d.facilityId) ?? null : null,
+            doc_type_confidence: null,
+            sampled_on: effectiveMetadata.sampled_on.value,
+            reported_on: effectiveMetadata.reported_on.value,
+            facility_name: effectiveMetadata.facility_name.value,
             // ★ 两列都下发:告警条件恒为 person_check='mismatch' AND person_check_ack_at IS NULL
             person_check: d.personCheck as never,
             person_check_ack_at: d.personCheckAckAt?.toISOString() ?? null,
             archived_at: d.archivedAt?.toISOString() ?? null,
+            encounter_id: d.encounterId,
+            effective_metadata: effectiveMetadata,
+            dates: {
+              sampled_on: d.sampledOn, reported_on: d.reportedOn,
+              latest_encounter_on: d.latestEncounterOn,
+              captured_on: d.captureDate, selected_date: d.selectedDate,
+              selected_date_field: input.date_field,
+            },
+            revision: d.revision ?? 0,
+            assist_suggestion_count: d.assistSuggestionCount,
           };
         }),
-        next_cursor: rows.length > input.limit && last ? encodeCursor(last.capturedAt.toISOString(), last.id) : null,
+        next_cursor: rows.length > input.limit && last ? encodeDocumentCursor({
+          selectedDate: last.selectedDate, capturedAt: last.capturedAt.toISOString(),
+          documentId: last.id, dateField: input.date_field,
+        }) : null,
       };
     },
   });

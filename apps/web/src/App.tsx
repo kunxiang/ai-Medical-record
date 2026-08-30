@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Archive, Camera, CircleUserRound, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { Archive, Camera, CircleUserRound, Database, ShieldCheck, TrendingUp, TriangleAlert, X } from 'lucide-react';
+import type { CapabilitiesResponseT } from '@amr/contracts';
 import { api, auth, type CreatePersonInput } from './api/client.js';
+import {
+  CORE_ONLY_CAPABILITIES, failClosedCapabilityState, type CapabilityStatus,
+} from './api/capability-state.js';
 import {
   allCachedPeople, allCaptures, clearAllLocalData, kvGet, kvSet, putCachedPerson,
   recoverAfterRestart, replaceCachedPeople,
@@ -11,10 +15,19 @@ import { lastPersistStatus, requestPersistence } from './offline/persist.js';
 import { LoginView } from './features/capture/LoginView.js';
 import { CaptureView } from './features/capture/CaptureView.js';
 import { BrowseView } from './features/browse/BrowseView.js';
+import type { BrowseSourceTarget } from './features/browse/BrowseView.js';
 import { AccountView } from './features/account/AccountView.js';
+import { DataView } from './features/data/DataView.js';
+import { TrendsView } from './features/trends/TrendsView.js';
+import { ContextDialog } from './features/context/ContextDialog.js';
+import {
+  ensureDocumentContextPlaceholder, refreshContextTemplateCache, syncAllContext,
+} from './offline/context.js';
 import { BrandMark } from './ui/BrandMark.js';
 import { Alert } from './ui/Alert.js';
+import { Button } from './ui/Button.js';
 import { cn } from './ui/cn.js';
+import { MAIN_NAVIGATION, type MainTab } from './navigation.js';
 
 export type Person = PersonCacheRecord;
 
@@ -24,8 +37,17 @@ export function App(): JSX.Element {
   const [selected, setSelected] = useState<Person | null>(null);
   const [queue, setQueue] = useState<CaptureRecord[]>([]);
   const [persisted, setPersisted] = useState(true);
-  const [tab, setTab] = useState<'capture' | 'browse' | 'account'>('capture');
+  const [tab, setTab] = useState<MainTab>('browse');
+  const [captureOpen, setCaptureOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [capabilities, setCapabilities] = useState<CapabilitiesResponseT>(CORE_ONLY_CAPABILITIES);
+  const [capabilityStatus, setCapabilityStatus] = useState<CapabilityStatus>('loading');
+  const [accountTimezone, setAccountTimezone] = useState(
+    Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai',
+  );
+  const [contextSessionId, setContextSessionId] = useState<string | null>(null);
+  const [contextRefreshToken, setContextRefreshToken] = useState(0);
+  const [browseSourceTarget, setBrowseSourceTarget] = useState<BrowseSourceTarget | null>(null);
   const peopleMutationRevision = useRef(0);
 
   const refreshQueue = useCallback(async () => {
@@ -65,6 +87,8 @@ export function App(): JSX.Element {
       try {
         const revision = peopleMutationRevision.current;
         const res = await api.people();
+        const account = await api.account().catch(() => null);
+        if (account) setAccountTimezone(account.timezone);
         // 创建成员可能与登录后的初次刷新并发。较早发出的 GET 不得用旧列表覆盖新成员。
         if (revision !== peopleMutationRevision.current) return;
         const slim: Person[] = res.people.map((p) => ({
@@ -77,10 +101,70 @@ export function App(): JSX.Element {
         await kvSet('people_fetched_at', new Date().toISOString());
         setPeople(slim);
         setSelected((cur) => cur ?? slim[0] ?? null);
+        try {
+          await refreshContextTemplateCache(res.people, account?.timezone ?? accountTimezone);
+          await syncAllContext();
+          setContextRefreshToken((value) => value + 1);
+        } catch {
+          // 模板刷新失败不能阻止归档；本地已有模板/草稿仍可继续使用。
+        }
       } catch {
         /* 离线:用缓存渲染 */
       }
     })();
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    let stopped = false;
+    let running = false;
+    const run = async () => {
+      if (stopped || running || !navigator.onLine) return;
+      running = true;
+      try {
+        const changed = await syncAllContext();
+        if (changed > 0 && !stopped) setContextRefreshToken((value) => value + 1);
+      } finally { running = false; }
+    };
+    const onOnline = () => void run();
+    const onVisible = () => { if (document.visibilityState === 'visible') void run(); };
+    window.addEventListener('online', onOnline);
+    document.addEventListener('visibilitychange', onVisible);
+    const interval = window.setInterval(() => void run(), 30_000);
+    void run();
+    return () => {
+      stopped = true;
+      window.clearInterval(interval);
+      window.removeEventListener('online', onOnline);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) {
+      setCapabilities(CORE_ONLY_CAPABILITIES);
+      setCapabilityStatus('loading');
+      return;
+    }
+    let cancelled = false;
+    setCapabilityStatus('loading');
+    void api.capabilities().then(
+      (result) => {
+        if (cancelled) return;
+        setCapabilities(result);
+        setCapabilityStatus('known');
+      },
+      () => {
+        if (cancelled) return;
+        // 能力发现失败必须 fail closed；不影响任何 core 数据流，也不显示 provider 错误。
+        const fallback = failClosedCapabilityState();
+        setCapabilities(fallback.capabilities);
+        setCapabilityStatus(fallback.status);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
   }, [token]);
 
   useEffect(() => {
@@ -172,6 +256,19 @@ export function App(): JSX.Element {
     );
   }
 
+  const navigation = MAIN_NAVIGATION.map((item) => ({
+    ...item,
+    icon: item.id === 'browse' ? Archive
+      : item.id === 'data' ? Database
+      : item.id === 'trends' ? TrendingUp
+      : CircleUserRound,
+  }));
+
+  const openTab = (next: MainTab) => {
+    setCaptureOpen(false);
+    setTab(next);
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-background text-ink font-sans selection:bg-brand-100 selection:text-brand-900">
       {/* Topbar Header */}
@@ -194,64 +291,25 @@ export function App(): JSX.Element {
           </div>
 
           {/* Navigation Controls */}
-          <nav
-            className="flex items-center p-1 rounded-2xl bg-surface-subtle border border-line/70"
-            aria-label="主要导航"
-          >
-            <button
-              type="button"
-              onClick={() => setTab('capture')}
-              data-testid="tab-capture"
-              className={cn(
-                'relative flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-150 cursor-pointer',
-                tab === 'capture'
-                  ? 'bg-brand-500 text-white shadow-xs'
-                  : 'text-muted hover:text-ink',
-              )}
-            >
-              <Camera size={16} aria-hidden="true" />
-              <span>采集</span>
-              {pendingCount > 0 && (
-                <span
+          <nav className="hidden md:flex items-center p-1 rounded-2xl bg-surface-subtle border border-line/70" aria-label="主要导航">
+            {navigation.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => openTab(item.id)}
+                  data-testid={`tab-${item.id}`}
                   className={cn(
-                    'inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold leading-none',
-                    tab === 'capture' ? 'bg-white text-brand-700' : 'bg-brand-500 text-white',
+                    'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer',
+                    tab === item.id && !captureOpen ? 'bg-brand-500 text-white shadow-xs' : 'text-muted hover:text-ink',
                   )}
                 >
-                  {pendingCount}
-                </span>
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setTab('browse')}
-              data-testid="tab-browse"
-              className={cn(
-                'flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-150 cursor-pointer',
-                tab === 'browse'
-                  ? 'bg-brand-500 text-white shadow-xs'
-                  : 'text-muted hover:text-ink',
-              )}
-            >
-              <Archive size={16} aria-hidden="true" />
-              <span>档案</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setTab('account')}
-              data-testid="tab-account"
-              className={cn(
-                'flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-150 cursor-pointer',
-                tab === 'account'
-                  ? 'bg-brand-500 text-white shadow-xs'
-                  : 'text-muted hover:text-ink',
-              )}
-            >
-              <CircleUserRound size={16} aria-hidden="true" />
-              <span>账户</span>
-            </button>
+                  <Icon size={15} aria-hidden="true" />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
           </nav>
 
           {/* Privacy badge */}
@@ -263,7 +321,7 @@ export function App(): JSX.Element {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 w-full max-w-4xl mx-auto px-4 py-6 md:px-6 md:py-8 space-y-6">
+      <main className="flex-1 w-full max-w-4xl mx-auto px-4 pt-6 pb-32 md:px-6 md:py-8 space-y-6">
         {notice && (
           <Alert variant="warning" data-testid="notice">
             <span>{notice}</span>
@@ -278,30 +336,125 @@ export function App(): JSX.Element {
           </Alert>
         )}
 
-        {tab === 'capture' ? (
-          <CaptureView
-            people={people}
-            selected={selected}
-            onSelect={onSelect}
-            onCreatePerson={createPerson}
-            queue={queue}
-            onQueueChanged={refreshQueue}
-          />
+        {captureOpen ? (
+          <div className="space-y-4" data-testid="capture-workspace">
+            <div className="flex items-center justify-between rounded-2xl border border-brand-200 bg-brand-50 px-4 py-3">
+              <div>
+                <strong className="text-sm text-brand-900">采集医疗文档</strong>
+                <p className="text-xs text-brand-700">归人仍是采集时唯一必须确认的信息。</p>
+              </div>
+              <Button variant="ghost" size="sm" iconLeft={<X size={15} />} onClick={() => setCaptureOpen(false)}>关闭采集</Button>
+            </div>
+            <CaptureView
+              people={people}
+              selected={selected}
+              onSelect={onSelect}
+              onCreatePerson={createPerson}
+              queue={queue}
+              onQueueChanged={refreshQueue}
+              onCaptureFinished={async (capture) => {
+                if (!capture.person_id) return;
+                const person = people.find((item) => item.id === capture.person_id);
+                if (!person) return;
+                const session = await ensureDocumentContextPlaceholder(person, capture.client_document_id);
+                setContextSessionId(session.id);
+                setContextRefreshToken((value) => value + 1);
+              }}
+            />
+          </div>
         ) : tab === 'browse' ? (
           <BrowseView
             person={selected}
             people={people}
             onSelect={onSelect}
             queue={queue}
+            assistAvailable={capabilities.assist.available}
+            onOpenContext={(clientDocumentId) => {
+              if (!selected) return;
+              void ensureDocumentContextPlaceholder(selected, clientDocumentId).then((session) => {
+                setContextSessionId(session.id);
+                setContextRefreshToken((value) => value + 1);
+              });
+            }}
+            sourceTarget={browseSourceTarget}
+            onSourceConsumed={() => setBrowseSourceTarget(null)}
+          />
+        ) : tab === 'data' ? (
+          <DataView
+            person={selected}
+            people={people}
+            onSelect={onSelect}
+            timezone={accountTimezone}
+            onOpenContext={setContextSessionId}
+            onOpenSource={(target) => {
+              setBrowseSourceTarget(target);
+              openTab('browse');
+            }}
+            contextRefreshToken={contextRefreshToken}
+          />
+        ) : tab === 'trends' ? (
+          <TrendsView
+            person={selected}
+            onOpenArchive={() => openTab('browse')}
+            onOpenData={() => openTab('data')}
+            onOpenSource={(target) => {
+              setBrowseSourceTarget(target);
+              openTab('browse');
+            }}
           />
         ) : (
           <AccountView
             queuedItemCount={queue.length}
             onLogout={logout}
             onDeleteAccount={deleteAccount}
+            capabilities={capabilities}
+            capabilityStatus={capabilityStatus}
           />
         )}
       </main>
+
+      {contextSessionId && (
+        <ContextDialog
+          sessionId={contextSessionId}
+          onClose={() => setContextSessionId(null)}
+          onChanged={() => setContextRefreshToken((value) => value + 1)}
+        />
+      )}
+
+      {!captureOpen && (
+        <button
+          type="button"
+          onClick={() => setCaptureOpen(true)}
+          data-testid="capture-fab"
+          aria-label="采集医疗文档"
+          className="fixed bottom-24 right-4 z-40 inline-flex min-h-14 items-center gap-2 rounded-2xl bg-brand-600 px-4 text-sm font-bold text-white shadow-xl transition hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 md:bottom-8 md:right-8"
+        >
+          <Camera size={21} />
+          <span className="hidden sm:inline">采集</span>
+          {pendingCount > 0 && <span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] text-brand-700">{pendingCount}</span>}
+        </button>
+      )}
+
+      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t border-line bg-white/95 px-2 pb-[max(.5rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(15,23,42,.08)] backdrop-blur-md md:hidden" aria-label="移动端主要导航">
+        {navigation.map((item) => {
+          const Icon = item.icon;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => openTab(item.id)}
+              data-testid={`mobile-tab-${item.id}`}
+              className={cn(
+                'flex min-h-12 flex-col items-center justify-center gap-1 rounded-xl text-[11px] font-semibold',
+                tab === item.id && !captureOpen ? 'bg-brand-50 text-brand-700' : 'text-muted',
+              )}
+            >
+              <Icon size={19} />
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
+      </nav>
 
       {/* Footer */}
       <footer className="w-full py-6 px-4 border-t border-line/60 text-center text-xs text-muted/80 bg-white/40">

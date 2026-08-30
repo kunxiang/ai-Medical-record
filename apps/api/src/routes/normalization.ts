@@ -11,9 +11,9 @@ import { document, facility, normalizationDecision, person, personAccess } from 
 import { defineRoute } from '../define-route.js';
 import { ApiError, notFound } from '../errors.js';
 import { appendDecision } from '../journal.js';
-import { applyFacilityDecision } from '../normalization/facility-service.js';
+import { applyFacilityDecision } from '../normalization/facility-decisions.js';
 import { facilityFingerprint } from '../normalization/facility-fingerprint.js';
-import { applyEncounterDecision, EncounterJobFailure } from '../normalization/encounter-service.js';
+import { applyEncounterDecision, EncounterDecisionFailure } from '../normalization/encounter-decisions.js';
 
 async function requireAnyEditor(accountId: string): Promise<void> {
   const row = (await db
@@ -133,19 +133,19 @@ export function registerNormalizationRoutes(app: FastifyInstance): void {
         if (row.state !== 'proposed') {
           throw new ApiError('validation_failed', '该归一建议已经完成审核，不能再次更改');
         }
+        const at = serverTimestamp();
         if (row.kind === 'facility') {
           await applyFacilityDecision(tx, row.inputFingerprint, row.proposal, input.decision);
         } else {
           try {
-            await applyEncounterDecision(tx, row.proposal, input.decision);
+            await applyEncounterDecision(tx, row.proposal, input.decision, { accountId, at });
           } catch (error) {
-            if (error instanceof EncounterJobFailure) {
+            if (error instanceof EncounterDecisionFailure) {
               throw new ApiError('validation_failed', error.message);
             }
             throw error;
           }
         }
-        const at = serverTimestamp();
         let decisionPayload: Record<string, unknown> = row.proposal as Record<string, unknown>;
         if (row.kind === 'encounter') {
           const proposal = EncounterProposal.parse(row.proposal);
