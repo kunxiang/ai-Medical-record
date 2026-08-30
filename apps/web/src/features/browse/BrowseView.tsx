@@ -7,8 +7,8 @@ import {
 } from '@amr/contracts';
 import {
   AlertTriangle, Archive, Building2, CalendarDays, Check, ChevronLeft, ChevronRight, Clock3,
-  Download, FileImage, FileText, LoaderCircle, MapPin, Maximize2, RotateCcw,
-  RotateCw, Search, ShieldCheck, SlidersHorizontal, Trash2, UploadCloud, UserRoundCog, X,
+  FileImage, FileText, LoaderCircle, MapPin, Maximize2, RotateCcw,
+  RotateCw, Search, SearchX, ShieldCheck, SlidersHorizontal, Trash2, UploadCloud, UserRoundCog, X,
 } from 'lucide-react';
 import { uuidv7 } from 'uuidv7';
 import { api, auth, derivativeUrl } from '../../api/client.js';
@@ -98,10 +98,24 @@ export function BrowseView({
   const [filters, setFilters] = useState<{
     q: string; dateField: DateFieldT; from: string; to: string; docType: string; encounterId: string;
   }>({ q: '', dateField: 'best_available', from: '', to: '', docType: '', encounterId: '' });
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  // dateField 只改排序与分组，不会排除文档，所以不参与"筛选后为空"的判断。
+  const excludingFilters = Boolean(
+    filters.q || filters.from || filters.to || filters.docType || filters.encounterId,
+  );
+  // 折叠面板里生效的条件数，让收起时也能看出还有筛选在起作用。
+  const advancedFilterCount = [
+    filters.from, filters.to, filters.docType, filters.encounterId,
+    filters.dateField !== 'best_available' ? 'date' : '',
+    showArchived ? 'archived' : '',
+  ].filter(Boolean).length;
+  const clearFilters = () => {
+    setQueryDraft('');
+    setFilters({ q: '', dateField: 'best_available', from: '', to: '', docType: '', encounterId: '' });
+  };
   const [encounters, setEncounters] = useState<EncounterT[]>([]);
   const [searchResults, setSearchResults] = useState<SearchResultT[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
-  const [bundleLoading, setBundleLoading] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
@@ -184,27 +198,6 @@ export function BrowseView({
     ).finally(() => { if (!cancelled) setSearchLoading(false); });
     return () => { cancelled = true; };
   }, [person?.id, filters]);
-
-  const downloadBundle = useCallback(async () => {
-    if (!person) return;
-    setBundleLoading(true);
-    setError(null);
-    try {
-      const result = await api.downloadPersonBundle(person.id);
-      const url = URL.createObjectURL(result.blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = result.filename;
-      document.body.append(anchor);
-      anchor.click();
-      anchor.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 0);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '档案包下载失败');
-    } finally {
-      setBundleLoading(false);
-    }
-  }, [person]);
 
   useEffect(() => {
     if (!person) {
@@ -414,25 +407,6 @@ export function BrowseView({
         }
         action={
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void downloadBundle()}
-              loading={bundleLoading}
-              iconLeft={<Download size={14} />}
-              className="rounded-xl"
-            >
-              导出档案包
-            </Button>
-            <Button
-              variant={showArchived ? 'soft' : 'outline'}
-              size="sm"
-              onClick={() => setShowArchived((v) => !v)}
-              iconLeft={<Archive size={14} />}
-              className={cn('rounded-xl', showArchived ? 'font-semibold' : '')}
-            >
-              {showArchived ? '含已归档' : '查看已归档'}
-            </Button>
             <span className="w-8 h-8 rounded-full bg-brand-500 text-white font-bold text-xs flex items-center justify-center shadow-xs">
               {person.display_name.slice(0, 1)}
             </span>
@@ -486,19 +460,21 @@ export function BrowseView({
             aria-label="搜索档案"
           />
           <Button type="submit" variant="primary" iconLeft={<Search size={15} />}>搜索</Button>
+          <Button
+            type="button"
+            variant={filtersOpen ? 'soft' : 'ghost'}
+            onClick={() => setFiltersOpen((open) => !open)}
+            iconLeft={<SlidersHorizontal size={15} />}
+            aria-expanded={filtersOpen}
+            data-testid="toggle-filters"
+          >
+            筛选{advancedFilterCount > 0 ? ` · ${advancedFilterCount}` : ''}
+          </Button>
           {(filters.q || filters.from || filters.to || filters.docType || filters.encounterId || filters.dateField !== 'best_available') && (
-            <Button
-              variant="ghost"
-              onClick={() => {
-                setQueryDraft('');
-                setFilters({ q: '', dateField: 'best_available', from: '', to: '', docType: '', encounterId: '' });
-              }}
-            >
-              清除
-            </Button>
+            <Button variant="ghost" onClick={clearFilters}>清除</Button>
           )}
         </form>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5" hidden={!filtersOpen}>
           <Select value={filters.dateField} onChange={(event) => setFilters((current) => ({ ...current, dateField: event.target.value as DateFieldT }))} iconLeft={<SlidersHorizontal size={15} />} aria-label="日期语义">
             <option value="best_available">最佳可用日期</option>
             <option value="sampled">采样日期</option>
@@ -512,6 +488,15 @@ export function BrowseView({
             <option value="">全部文档类型</option>
             {Object.entries(DOC_TYPE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </Select>
+          <Button
+            type="button"
+            variant={showArchived ? 'soft' : 'outline'}
+            onClick={() => setShowArchived((v) => !v)}
+            iconLeft={<Archive size={15} />}
+            className={cn('justify-center', showArchived ? 'font-semibold' : '')}
+          >
+            {showArchived ? '含已归档' : '查看已归档'}
+          </Button>
           <Select value={filters.encounterId} onChange={(event) => setFilters((current) => ({ ...current, encounterId: event.target.value }))} aria-label="就诊筛选">
             <option value="">全部就诊</option>
             {encounters.map((item) => <option key={item.id} value={item.id}>{item.occurred_on} · {item.department || ENCOUNTER_TYPE_LABEL[item.encounter_type]}</option>)}
@@ -901,7 +886,16 @@ export function BrowseView({
         </div>
       )}
 
-      {docs.length === 0 && !loading && (
+      {docs.length === 0 && !loading && (excludingFilters ? (
+        <EmptyState
+          variant="card"
+          icon={<SearchX size={32} />}
+          title="没有符合当前筛选的记录"
+          description="这里只是筛选结果为空，已归档的原件仍在档案库中。换个关键词或日期范围，或清除筛选查看全部。"
+          action={<Button variant="soft" onClick={clearFilters}>清除筛选</Button>}
+          data-testid="browse-empty-filtered"
+        />
+      ) : (
         <EmptyState
           variant="card"
           icon={<Archive size={32} />}
@@ -909,7 +903,7 @@ export function BrowseView({
           description="使用右下角采集按钮，拍照或导入第一份医疗记录。"
           data-testid="browse-empty"
         />
-      )}
+      ))}
 
       <DocumentDetailDialog
         documentId={detailDocumentId}

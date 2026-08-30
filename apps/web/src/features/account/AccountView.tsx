@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  CalendarDays, CircleUserRound, Clock3, KeyRound, LogOut, Mail,
+  CalendarDays, CircleUserRound, Clock3, Download, KeyRound, LogOut, Mail,
   ShieldCheck, Sparkles, Trash2, TriangleAlert,
 } from 'lucide-react';
 import type { AccountProfileT, CapabilitiesResponseT } from '@amr/contracts';
@@ -26,18 +26,22 @@ function formatCreatedAt(value: string): string {
 
 export function AccountView({
   queuedItemCount,
+  people,
   onLogout,
   onDeleteAccount,
   capabilities,
   capabilityStatus,
 }: {
   queuedItemCount: number;
+  people: Array<{ id: string; display_name: string }>;
   onLogout: () => void;
   onDeleteAccount: (password: string) => Promise<void>;
   capabilities: CapabilitiesResponseT;
   capabilityStatus: 'loading' | 'known' | 'unknown';
 }): JSX.Element {
   const [profile, setProfile] = useState<AccountProfileT | null>(null);
+  const [bundlePersonId, setBundlePersonId] = useState<string | null>(null);
+  const [bundleError, setBundleError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [password, setPassword] = useState('');
@@ -80,6 +84,26 @@ export function AccountView({
         setDeleteError('账户注销失败，请检查网络后重试。');
       }
       setDeleting(false);
+    }
+  };
+
+  const downloadBundle = async (personId: string): Promise<void> => {
+    setBundlePersonId(personId);
+    setBundleError(null);
+    try {
+      const result = await api.downloadPersonBundle(personId);
+      const url = URL.createObjectURL(result.blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = result.filename;
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (cause) {
+      setBundleError(cause instanceof Error ? cause.message : '档案包下载失败');
+    } finally {
+      setBundlePersonId(null);
     }
   };
 
@@ -177,6 +201,40 @@ export function AccountView({
                     : '当前未启用；归档、浏览和账户功能不受影响。'}
             </p>
           </div>
+        </div>
+      </Card>
+
+      <Card className="space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-surface-subtle text-brand-600 flex items-center justify-center shrink-0">
+            <Download size={20} />
+          </div>
+          <div>
+            <h2 className="text-base font-bold text-ink">导出档案包</h2>
+            <p className="text-xs text-muted">
+              按成员打包该人的原件与已确认事实，用于备份或换设备；不包含其他成员的数据。
+            </p>
+          </div>
+        </div>
+
+        {bundleError && <Alert variant="danger"><span>{bundleError}</span></Alert>}
+
+        <div className="grid gap-2 sm:grid-cols-2">
+          {people.map((item) => (
+            <Button
+              key={item.id}
+              variant="outline"
+              size="md"
+              className="justify-between"
+              loading={bundlePersonId === item.id}
+              disabled={bundlePersonId !== null && bundlePersonId !== item.id}
+              onClick={() => void downloadBundle(item.id)}
+              data-testid={`bundle-${item.id}`}
+            >
+              <span className="truncate">{item.display_name}</span>
+              <Download size={15} />
+            </Button>
+          ))}
         </div>
       </Card>
 

@@ -405,6 +405,7 @@ export function App(): JSX.Element {
         ) : (
           <AccountView
             queuedItemCount={queue.length}
+            people={people}
             onLogout={logout}
             onDeleteAccount={deleteAccount}
             capabilities={capabilities}
