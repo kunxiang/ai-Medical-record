@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { DocType } from './enums.js';
-import { DocShortId, IsoDate, IsoDateTime } from './scalars.js';
+import { DocShortId, IsoDate, IsoDateTime, LocalOrOffsetDateTime } from './scalars.js';
 
 // spec m2-03 §1:Stage 1 输出。全部 .strict() —— 未知键即失败,与 sidecar 同一纪律。
 // 单一出处:packages/ai 的 prompt 与调用点一律引用此处,禁止重复维护枚举。
@@ -85,5 +85,21 @@ export const S1Artifact = z
   .strict();
 
 export type Stage1OutT = z.infer<typeof Stage1Out>;
+
+/** 模型响应的**解析**层。线上契约(Stage1Out)保持严格 —— 它同时是发给模型的 json_schema
+ *  与 artifact 的存储类型,改动会让请求指纹漂移、既有 cassette 基线全部失配。
+ *
+ *  但解析必须宽容:实测(e2e 2026-08-30)模型把患者、机构、科室、日期全部读对,
+ *  只因 event_at 写成单据上印的 "2026-08-21T19:08:00"(无时区)就被整份丢弃。
+ *  纸上印的时分本来就没有时区,补一个偏移是编造;拒收则是把正确识别当垃圾扔掉。
+ *  这里接受两种时刻形态、并让不合规的日期各自退化为 null,再由 handler 按账户时区
+ *  归一成带偏移的瞬时,交回严格层落库。 */
+export const Stage1OutLenient = Stage1Out.extend({
+  sampled_on: IsoDate.nullable().catch(null),
+  reported_on: IsoDate.nullable().catch(null),
+  event_at: LocalOrOffsetDateTime.nullable().catch(null),
+});
+export type Stage1OutLenientT = z.infer<typeof Stage1OutLenient>;
+
 export type Stage1PageT = z.infer<typeof Stage1Page>;
 export type S1ArtifactT = z.infer<typeof S1Artifact>;

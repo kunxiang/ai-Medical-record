@@ -8,7 +8,8 @@ import {
 } from '@amr/ai';
 import { buildKey, canonicalJson, serverTimestamp } from '@amr/storage';
 import { db } from '../db/client.js';
-import { document, documentPage, person, processingSuggestion } from '../db/schema.js';
+import { instantFromReport, reportInstantIso } from './report-time.js';
+import { account, document, documentPage, person, personAccess, processingSuggestion } from '../db/schema.js';
 import { ensureDerivative } from '../derivatives.js';
 import { getObjectBytes, getObjectText, presignGetKey, putWorm } from '../s3.js';
 import { normalizeName, personCheckOf } from '../person-check.js';
@@ -28,7 +29,7 @@ export class Stage1Failure extends Error {
 
 interface DocContext {
   documentId: string; shortId: string; personId: string; personSlug: string;
-  displayName: string; namePinyin: string | null;
+  displayName: string; namePinyin: string | null; timezone: string;
   pages: Array<{ pageNo: number; storageKey: string; mimeType: string; byteSize: number }>;
 }
 
@@ -37,12 +38,16 @@ async function loadContext(documentId: string): Promise<DocContext | null> {
     .select({
       documentId: document.id, shortId: document.shortId, personId: document.personId,
       personSlug: person.slug, displayName: person.displayName, namePinyin: person.namePinyin,
+      timezone: account.timezone,
       pageNo: documentPage.pageNo, storageKey: documentPage.storageKey,
       mimeType: documentPage.mimeType, byteSize: documentPage.byteSize,
     })
     .from(documentPage)
     .innerJoin(document, eq(document.id, documentPage.documentId))
     .innerJoin(person, eq(person.id, document.personId))
+    // 单据上的时分不带时区,只能按档案所有者的时区解释(见 eventTime 写入处)
+    .innerJoin(personAccess, and(eq(personAccess.personId, person.id), eq(personAccess.role, 'owner')))
+    .innerJoin(account, eq(account.id, personAccess.accountId))
     .where(eq(documentPage.documentId, documentId))
     .orderBy(documentPage.pageNo);
   const first = rows[0];
@@ -50,6 +55,7 @@ async function loadContext(documentId: string): Promise<DocContext | null> {
   return {
     documentId: first.documentId, shortId: first.shortId, personId: first.personId,
     personSlug: first.personSlug, displayName: first.displayName, namePinyin: first.namePinyin,
+    timezone: first.timezone,
     pages: rows.map((r) => ({
       pageNo: r.pageNo, storageKey: r.storageKey, mimeType: r.mimeType, byteSize: r.byteSize,
     })),
@@ -176,7 +182,13 @@ export async function handleStage1(documentId: string, suggestionTarget?: {
           throw new Stage1Failure('needs_human', { stage: 's1', code: 'refusal', message: e.message, category: f.category });
         }
         if (f.kind === 'max_tokens' || f.kind === 'invalid_output' || f.kind === 'no_text_block') {
-          throw new Stage1Failure('needs_human', { stage: 's1', code: f.kind, message: e.message });
+          // detail 是这类失败唯一能说清"哪个字段、错在哪"的线索。丢掉它,账本里只剩一句
+          // "输出未通过 schema 校验",事后无从复盘(2026-08-30 e2e 就是被这一句挡了半天)。
+          const detail = f.kind === 'invalid_output' ? f.detail : null;
+          throw new Stage1Failure('needs_human', {
+            stage: 's1', code: f.kind,
+            message: detail ? `${e.message}: ${detail}` : e.message,
+          });
         }
       }
       throw e;   // 其余交给 worker 按可重试处理
@@ -186,7 +198,12 @@ export async function handleStage1(documentId: string, suggestionTarget?: {
       document_short_id: ctx.shortId, produced_at: serverTimestamp(),
       model: ran.model, prompt_id: prompt.id, prompt_version: ran.promptVersion,
       prompt_sha256: ran.promptSha256, effort: 'medium', batches: ran.batches,
-      usage: ran.usage, output: Stage1Out.parse(ran.output),
+      // 宽松解析层可能给回单据上无时区的时刻;按档案所有者时区定成瞬时后,才符合严格契约。
+      usage: ran.usage,
+      output: Stage1Out.parse({
+        ...ran.output,
+        event_at: reportInstantIso(ran.output.event_at, ctx.timezone),
+      }),
     });
     await putWorm(artifactKey, canonicalJson(artifact), 'application/json');
   }
@@ -203,7 +220,7 @@ export async function handleStage1(documentId: string, suggestionTarget?: {
         docTypeConfidence: String(out.doc_type_confidence),
         sampledOn: out.sampled_on,
         reportedOn: out.reported_on,
-        eventTime: out.event_at ? new Date(out.event_at) : null,
+        eventTime: instantFromReport(out.event_at, ctx.timezone),
         // ★ S1 读到了报告上印的时分,但**不知道那是采集时刻还是报告时刻**。
         //   而 event_time_source 存在的理由正是 docs/03 §239:"否则时间轴的精度无从判断"
         //   —— 影像的报告时间晚于实际检查,化验的采集时刻就是事件本身。

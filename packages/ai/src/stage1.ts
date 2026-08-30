@@ -1,5 +1,5 @@
 import { zodToJsonSchema } from 'zod-to-json-schema';
-import { Stage1Out, type Stage1OutT } from '@amr/contracts';
+import { Stage1Out, Stage1OutLenient, type Stage1OutLenientT } from '@amr/contracts';
 import { BETAS, MODEL, S1_EFFORT, S1_MAX_TOKENS, S1_MAX_TOKENS_RETRY } from './models.js';
 import { getPrompt } from './prompts.js';
 import {
@@ -49,7 +49,8 @@ export interface S1PdfInput {
 }
 
 export interface S1Result {
-  output: Stage1OutT;
+  /** 宽松解析结果:event_at 可能是单据上无时区的时刻,由调用方按已知时区归一后再落库。 */
+  output: Stage1OutLenientT;
   /** 实际服务模型 —— fallback 生效时不等于 MODEL(m2-02 §5.3) */
   model: string;
   usage: {
@@ -127,7 +128,14 @@ export function buildS1PdfRequest(
 function textOf(msg: BetaMessage): string {
   const blocks = (msg.content as Array<{ type: string; text?: string }>).filter((b) => b.type === 'text');
   if (blocks.length === 0) throw new S1Error({ kind: 'no_text_block' }, '响应中没有文本块');
-  return blocks.map((b) => b.text ?? '').join('');
+  return stripCodeFence(blocks.map((b) => b.text ?? '').join(''));
+}
+
+/** 即使要求了 json_schema,模型偶尔仍把 JSON 包在 ```json 围栏里(e2e 2026-08-30 实测命中)。
+ *  围栏不是内容,剥掉它不改变任何一个字段;不剥则整份正确识别都会被 JSON.parse 判死。 */
+function stripCodeFence(text: string): string {
+  const fenced = /^\s*```(?:json)?\s*\n([\s\S]*?)\n?\s*```\s*$/i.exec(text);
+  return fenced?.[1] ?? text;
 }
 
 /** **必须**先看 stop_reason 再读 content(m2-02 §5.1)。 */
@@ -148,9 +156,9 @@ function resultOf(res: BetaMessage, maxTokens: number, promptVersion?: number): 
     throw new S1Error({ kind: 'max_tokens' }, `输出被 max_tokens=${maxTokens} 截断`);
   }
 
-  let output: Stage1OutT;
+  let output: Stage1OutLenientT;
   try {
-    output = Stage1Out.parse(JSON.parse(textOf(res)));
+    output = Stage1OutLenient.parse(JSON.parse(textOf(res)));
   } catch (e) {
     if (e instanceof S1Error) throw e;
     throw new S1Error({ kind: 'invalid_output', detail: String(e).slice(0, 400) }, '输出未通过 schema 校验');

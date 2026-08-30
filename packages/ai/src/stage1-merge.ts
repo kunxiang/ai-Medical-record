@@ -1,4 +1,4 @@
-import { Stage1Out, type Stage1OutT } from '@amr/contracts';
+import { Stage1OutLenient, type Stage1OutLenientT } from '@amr/contracts';
 import { MAX_IMAGES_PER_REQUEST } from './models.js';
 
 // spec m2-03 §5:多页与分批合并。**纯函数,无 IO** —— 合并规则必须确定性,
@@ -20,7 +20,7 @@ export function planBatches(pageNos: number[]): number[][] {
 
 /** 校验一批返回的 page_no 集合与送入的完全一致(审核 #003 A7)。
  *  模型自行编号是最隐蔽的失败:合并时才炸,且炸得莫名其妙。 */
-export function assertBatchPages(sent: number[], got: Stage1OutT): void {
+export function assertBatchPages(sent: number[], got: Stage1OutLenientT): void {
   const a = [...sent].sort((x, y) => x - y).join(',');
   const b = got.pages.map((p) => p.page_no).sort((x, y) => x - y).join(',');
   if (a !== b) throw new MergeError(`批次页号不符:送入 [${a}],返回 [${b}]`);
@@ -32,7 +32,7 @@ const firstNonNull = <T>(vals: (T | null)[]): T | null => vals.find((v) => v !==
  * 合并多批结果。`batches` 必须按送入顺序(即 page_no 升序)排列。
  * 单批直接返回其自身(仍走一遍校验,保证两条路径行为一致)。
  */
-export function mergeBatches(batches: Stage1OutT[]): Stage1OutT {
+export function mergeBatches(batches: Stage1OutLenientT[]): Stage1OutLenientT {
   if (batches.length === 0) throw new MergeError('没有可合并的批次');
 
   // pages:按 page_no 拼接;同 page_no 出现两次即失败(m2-03 §5)
@@ -49,7 +49,9 @@ export function mergeBatches(batches: Stage1OutT[]): Stage1OutT {
     if (b.doc_type_confidence > best.doc_type_confidence) best = b;
   }
 
-  return Stage1Out.parse({
+  // 合并的是**解析层**结果:此处 event_at 仍可能是单据上无时区的时刻,
+  // 归一由 handler 按账户时区完成。这里若用严格层,分批文档会在合并时被整份丢弃。
+  return Stage1OutLenient.parse({
     doc_type: best.doc_type,
     doc_type_confidence: best.doc_type_confidence,
     patient_name: firstNonNull(batches.map((b) => b.patient_name)),
