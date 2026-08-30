@@ -13,7 +13,7 @@ const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 
 const KEY_BYTES_RE = /^[a-z0-9._/-]+$/;
 
-/** 派生物变体(ADR-050 新增 ai:送进模型的输入,旋正 + 长边 2576 + q92) */
+/** 派生物变体(ADR-050 新增 ai:送进模型的输入,旋正 + 缩放 + q92;长边随供应商定,见 DERIVATIVE_SPEC) */
 export type DerivativeVariant = 'thumb' | 'preview' | 'ai';
 export type ContextMediaExtension = 'm4a' | 'webm' | 'mp3' | 'wav' | 'jpg' | 'png' | 'webp';
 

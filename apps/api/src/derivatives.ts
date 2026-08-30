@@ -14,8 +14,18 @@ export function initSharp(): void {
 export const DERIVATIVE_SPEC = {
   thumb: { maxEdge: 400, quality: 82 },
   preview: { maxEdge: 1600, quality: 82 },
-  // ai:送进模型的输入。2576 是 Opus 5 高分辨率档的长边上限,超过只会被服务端downscale。
-  ai: { maxEdge: 2576, quality: 92 },
+  // ai:送进模型的输入。**这个数字跟着实际供应商走,不是越大越好。**
+  //
+  // 2026-08-30 对生产在用的 deepseek-v4-flash-vision-exp 实测(同一份化验单,800/1024/2576
+  // 各跑多轮):三档的 input_tokens 恒为 2002 —— 该模型把每张图归一到固定的 384 图像 token,
+  // 长边 2576 那张 903 KiB 的图一个 token 都没多买。而它反过来伤了两处:
+  //   · 可靠性:2576 档 1/4 成功,失败几乎都是供应商跨境回拉 903 KiB 图超时;1024 档 3/4 成功。
+  //   · 准确度:2576 唯一一次成功把患者姓名读成"肖坤"(应为"向坤")—— 姓名要喂给归人对账,
+  //     错读会直接产出假的 person_check mismatch。让 sharp 用 Lanczos 缩到接近模型原生尺寸,
+  //     比把大图丢给供应商自己压要好。
+  // 1024(768×1024 ≈ 79 万像素)贴近该模型约 800×800 的目标像素量,留一点余量给小字。
+  // 换供应商时重测这一档,不要沿用。
+  ai: { maxEdge: 1024, quality: 92 },
 } as const;
 
 export type Variant = keyof typeof DERIVATIVE_SPEC;
