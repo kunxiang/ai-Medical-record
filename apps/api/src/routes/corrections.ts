@@ -2,7 +2,7 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { uuidv7 } from 'uuidv7';
 import {
-  ArchiveRequest, ArchiveResponse, CaptureSidecar, CorrectionPageMove,
+  ArchiveRequest, ArchiveResponse, CaptureSidecar, CorrectionPageMove, PageCrop,
   CorrectionPersonReassign, CorrectionResponse, CorrectionSidecar, MergeRequest,
   MovePageRequest, PersonCheckAckRequest, PersonCheckAckResponse, ReassignRequest,
   S1Artifact, SplitRequest, Uuid,
@@ -42,6 +42,8 @@ interface DocumentContext {
 
 interface BoundaryPageRow {
   id: string;
+  /** document_page.crop(jsonb):人工确认的裁切角点,未校验的原始值 */
+  crop: unknown;
   pageNo: number;
   storageKey: string;
   contentSha256: string;
@@ -83,7 +85,7 @@ async function boundaryPages(tx: Tx, documentId: string): Promise<BoundaryPageRo
     id: documentPage.id, pageNo: documentPage.pageNo, storageKey: documentPage.storageKey,
     contentSha256: documentPage.contentSha256, byteSize: documentPage.byteSize,
     mimeType: documentPage.mimeType, width: documentPage.width, height: documentPage.height,
-    captureOrder: documentPage.captureOrder,
+    captureOrder: documentPage.captureOrder, crop: documentPage.crop,
   }).from(documentPage).where(eq(documentPage.documentId, documentId))
     .orderBy(asc(documentPage.pageNo));
 }
@@ -480,8 +482,10 @@ export function registerCorrectionRoutes(app: FastifyInstance): void {
             docShortId: newShortId,
           });
           capturePrefix = captureKey.slice(0, -'capture.json'.length);
+          const movedPages = pages.filter((page) => movedById.has(page.id));
+          const anyCrop = movedPages.some((page) => PageCrop.safeParse(page.crop).success);
           const capture = CaptureSidecar.parse({
-            schema_version: '2.0', document_id: newDocumentId, short_id: newShortId,
+            schema_version: anyCrop ? '2.1' : '2.0', document_id: newDocumentId, short_id: newShortId,
             person: { slug: source.personSlug, name: source.displayName, confirmed_by: 'api' },
             captured_at: source.capturedAt.toISOString(), capture_date: source.captureDate,
             source: 'split', uploaded_by: source.uploadedBy,
@@ -489,11 +493,14 @@ export function registerCorrectionRoutes(app: FastifyInstance): void {
             original_filename: source.originalFilename,
             pages: pages.filter((page) => movedById.has(page.id)).map((page) => {
               const move = movedById.get(page.id)!;
+              const crop = PageCrop.safeParse(page.crop);
               return {
                 page_no: move.toPageNo, capture_order: page.captureOrder,
                 // 跨前缀引用原件；新目录只承载该拆分文档自己的 capture.json。
                 file: page.storageKey, sha256: page.contentSha256, bytes: page.byteSize,
                 mime: page.mimeType, width: page.width, height: page.height,
+                // 人工裁切随页走 —— 拆分不该让人重新确认一遍
+                ...(crop.success ? { crop: crop.data } : {}),
               };
             }),
             created_at: at,

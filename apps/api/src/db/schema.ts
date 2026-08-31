@@ -249,6 +249,9 @@ export const documentPage = pgTable(
     thumbKey: text('thumb_key'),
     pageLabel: text('page_label'),
     captureOrder: integer('capture_order').notNull(),
+    // 人工确认的裁切角点 {quad,source}(P5-01)。权威副本在 WORM 的 capture.json 里,
+    // 这里是给 stage1 读的投影 —— 删库重建时由 capture.json 原样回填。
+    crop: jsonb('crop'),
     originCaptureDocumentId: uuid('origin_capture_document_id').notNull(),
     originCaptureOrder: integer('origin_capture_order').notNull(),
     originObjectSha256: text('origin_object_sha256').notNull(),

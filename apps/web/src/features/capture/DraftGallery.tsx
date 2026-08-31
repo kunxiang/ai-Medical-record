@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Camera, CheckCircle2, Eye, FileText, Images, Loader2,
   Plus, RotateCcw, RotateCw, Trash2, UploadCloud, Sparkles,
-  ArrowRight,
+  ArrowRight, Crop,
 } from 'lucide-react';
 import type { BlobRecord } from '../../offline/db.js';
 import { blobsOf } from '../../offline/db.js';
-import { rotateDraftPage, deleteDraftPage } from '../../offline/capture.js';
+import type { PageCropT } from '@amr/contracts';
+import { rotateDraftPage, deleteDraftPage, setPageCrop } from '../../offline/capture.js';
+import { detectCrop, whenDetectionSettles } from '../../offline/crop.js';
 import { Button } from '../../ui/Button.js';
 import { DraftPreviewModal } from './DraftPreviewModal.js';
 import { Card } from '../../ui/Card.js';
@@ -37,6 +39,9 @@ export function DraftGallery({
   const [finishing, setFinishing] = useState(false);
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [busyPage, setBusyPage] = useState<number | null>(null);
+  const [detecting, setDetecting] = useState<ReadonlySet<number>>(new Set());
+  // 每页只自动检测一次:人工改过或明确选择不裁之后,不该被下一次自动检测覆盖掉
+  const attemptedRef = useRef<Set<string>>(new Set());
 
   const loadBlobs = useCallback(async () => {
     setLoading(true);
@@ -72,6 +77,46 @@ export function DraftGallery({
     };
   }, [loadBlobs]);
 
+  // ★ 自动检测在页面进入草稿后自己跑,happy path 零新增点击:用户在网格里看到
+  //   "已框出识别范围"的角标,直接点上传即可。检测**绝不阻塞拍照按钮** ——
+  //   真实节奏是拍一张、返回、立刻再拍,任何同步等待都会把连拍流程拖垮。
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      for (const it of items) {
+        const r = it.record;
+        if (r.mime_type === 'application/pdf') continue;   // PDF 没有"单据边界"这回事
+        if (r.crop !== undefined) continue;                // 已检测过 / 人工定过
+        const key = `${r.page_no}:${r.sha256}`;
+        if (attemptedRef.current.has(key)) continue;
+        attemptedRef.current.add(key);
+
+        setDetecting((prev) => new Set(prev).add(r.page_no));
+        const crop = await detectCrop(r.blob);
+        if (cancelled) return;
+        await setPageCrop(draftId, r.page_no, crop);
+        if (cancelled) return;
+        setDetecting((prev) => {
+          const next = new Set(prev);
+          next.delete(r.page_no);
+          return next;
+        });
+        setItems((prev) => prev.map((x) => (
+          x.record.page_no === r.page_no ? { ...x, record: { ...x.record, crop } } : x
+        )));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [items, draftId]);
+
+  async function handleCropChange(pageNo: number, crop: PageCropT | null) {
+    await setPageCrop(draftId, pageNo, crop);
+    setItems((prev) => prev.map((x) => (
+      x.record.page_no === pageNo ? { ...x, record: { ...x.record, crop } } : x
+    )));
+    await onDraftChanged();
+  }
+
   async function handleRotate(pageNo: number, deg: 90 | -90) {
     if (busyPage !== null) return;
     setBusyPage(pageNo);
@@ -105,6 +150,8 @@ export function DraftGallery({
     if (finishing) return;
     setFinishing(true);
     try {
+      // 不能沉默地半裁半不裁 —— 要么等检测落定,要么超时后整份走不裁
+      await whenDetectionSettles();
       await onFinish();
     } finally {
       setFinishing(false);
@@ -221,6 +268,20 @@ export function DraftGallery({
                     <Loader2 size={24} className="animate-spin text-slate-400" />
                   )}
 
+                  {/* 裁切状态角标。缩略图只是**存在性信号**(裁了/没裁),不是正确性信号 ——
+                      一百多像素看不出框有没有压在字上,那要点开大图看。 */}
+                  {item.record.mime_type !== 'application/pdf' && (
+                    detecting.has(item.record.page_no) ? (
+                      <div className="absolute top-2 right-2 px-2 py-0.5 rounded-md bg-slate-900/70 backdrop-blur-xs text-slate-200 text-[10px] font-semibold">
+                        识别范围检测中…
+                      </div>
+                    ) : item.record.crop ? (
+                      <div className="absolute top-2 right-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-teal-500/90 text-white text-[10px] font-bold">
+                        <Crop size={11} /> 已框出范围
+                      </div>
+                    ) : null
+                  )}
+
                   {/* Page badge overlay */}
                   <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-slate-900/75 backdrop-blur-xs text-white text-[11px] font-bold">
                     第 {item.record.page_no} 页
@@ -300,6 +361,7 @@ export function DraftGallery({
           initialIndex={previewIndex}
           onClose={() => setPreviewIndex(null)}
           onRotate={handleRotate}
+          onCropChange={handleCropChange}
           onDelete={handleDelete}
           onFinish={handleFinish}
           finishing={finishing}

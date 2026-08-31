@@ -1,11 +1,21 @@
 import { useEffect, useState } from 'react';
 import {
   ChevronLeft, ChevronRight, RotateCcw, RotateCw, Trash2,
-  X, UploadCloud, FileText, Loader2, Sparkles,
+  X, UploadCloud, FileText, Loader2, Sparkles, Crop, Check, Undo2, Ban,
 } from 'lucide-react';
+import type { CropQuadT, PageCropT } from '@amr/contracts';
 import type { BlobRecord } from '../../offline/db.js';
 import { Button } from '../../ui/Button.js';
 import { IconButton } from '../../ui/IconButton.js';
+import { CropEditor } from './CropEditor.js';
+
+/** 手动起步用的内缩框:整幅会让四个手柄贴在边角上,没法拖。 */
+const MANUAL_SEED_INSET = 0.04;
+function seedQuad(): CropQuadT {
+  const a = MANUAL_SEED_INSET;
+  const b = 1 - MANUAL_SEED_INSET;
+  return [{ x: a, y: a }, { x: b, y: a }, { x: b, y: b }, { x: a, y: b }];
+}
 
 export function DraftPreviewModal({
   open,
@@ -13,6 +23,7 @@ export function DraftPreviewModal({
   initialIndex = 0,
   onClose,
   onRotate,
+  onCropChange,
   onDelete,
   onFinish,
   finishing,
@@ -22,11 +33,18 @@ export function DraftPreviewModal({
   initialIndex?: number;
   onClose: () => void;
   onRotate: (pageNo: number, degrees: 90 | -90) => Promise<void>;
+  onCropChange: (pageNo: number, crop: PageCropT | null) => Promise<void>;
   onDelete: (pageNo: number) => Promise<void>;
   onFinish: () => Promise<void>;
   finishing: boolean;
 }): JSX.Element | null {
   const [index, setIndex] = useState(initialIndex);
+  // ★ 裁切是**显式子模式**,不是常驻手势。主图区原本没有任何拖拽语义,
+  //   一旦图变成可拖的,用户会顺手拖着翻页,结果把框拖歪;而且浏览时的误触会静默改坏框。
+  //   进入编辑态才出手柄、才隐藏翻页钮,两个问题一起解决。
+  const [cropMode, setCropMode] = useState(false);
+  const [draftQuad, setDraftQuad] = useState<CropQuadT | null>(null);
+  const [savingCrop, setSavingCrop] = useState(false);
   const [rotating, setRotating] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -37,6 +55,9 @@ export function DraftPreviewModal({
 
   const safeIndex = Math.min(index, Math.max(0, blobs.length - 1));
   const current = blobs[safeIndex];
+
+  // 翻页/换图时退出编辑态 —— 否则会把 A 页的框保存到 B 页上
+  useEffect(() => { setCropMode(false); setDraftQuad(null); }, [safeIndex, current?.sha256]);
 
   useEffect(() => {
     if (!current || current.mime_type === 'application/pdf') {
@@ -54,12 +75,13 @@ export function DraftPreviewModal({
     if (!open) return;
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose();
+      if (cropMode) return;                       // 编辑态不翻页
       if (e.key === 'ArrowLeft' && safeIndex > 0) setIndex((i) => i - 1);
       if (e.key === 'ArrowRight' && safeIndex < blobs.length - 1) setIndex((i) => i + 1);
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [open, onClose, safeIndex, blobs.length]);
+  }, [open, onClose, safeIndex, blobs.length, cropMode]);
 
   if (!open || !current || blobs.length === 0) return null;
 
@@ -70,6 +92,18 @@ export function DraftPreviewModal({
       await onRotate(current.page_no, deg);
     } finally {
       setRotating(false);
+    }
+  }
+
+  async function handleCropSave(crop: PageCropT | null) {
+    if (savingCrop || !current) return;
+    setSavingCrop(true);
+    try {
+      await onCropChange(current.page_no, crop);
+      setCropMode(false);
+      setDraftQuad(null);
+    } finally {
+      setSavingCrop(false);
     }
   }
 
@@ -101,9 +135,19 @@ export function DraftPreviewModal({
             <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-brand-500/20 text-brand-300 border border-brand-500/30">
               第 {safeIndex + 1} 页 / 共 {blobs.length} 页
             </span>
-            <span className="text-xs text-slate-400 hidden sm:inline">
-              {current.width} × {current.height} · {(current.byte_size / 1024).toFixed(0)} KB
-            </span>
+            {cropMode ? (
+              /* ★ 这一行是整个功能里最重要的文案。用户看到自己的照片上出现一个框,
+                 本能反应是"它把我的照片剪了"—— 在家庭病历档案里这个焦虑是真实的。
+                 架构上原件一个字节都没动,但那件事对用户完全不可见,不说就没人知道。
+                 也刻意避开"裁剪"二字:它本身就带破坏性暗示。 */
+              <span className="text-xs text-teal-300">
+                拖动四角调整 · 框外只是不送去识别,<strong className="font-bold">原图完整保存</strong>
+              </span>
+            ) : (
+              <span className="text-xs text-slate-400 hidden sm:inline">
+                {current.width} × {current.height} · {(current.byte_size / 1024).toFixed(0)} KB
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -128,6 +172,8 @@ export function DraftPreviewModal({
                 <span className="text-xs text-slate-400 block">PDF 文档（不支持直接旋转）</span>
               </div>
             </div>
+          ) : imageUrl && cropMode && draftQuad ? (
+            <CropEditor imageUrl={imageUrl} quad={draftQuad} onChange={setDraftQuad} />
           ) : imageUrl ? (
             <img
               key={`${current.page_no}-${current.sha256}`}
@@ -142,8 +188,8 @@ export function DraftPreviewModal({
             </div>
           )}
 
-          {/* Left / Right Page Switchers */}
-          {blobs.length > 1 && (
+          {/* Left / Right Page Switchers —— 编辑态隐藏,免得和角点拖拽抢手势 */}
+          {blobs.length > 1 && !cropMode && (
             <>
               <button
                 type="button"
@@ -168,6 +214,47 @@ export function DraftPreviewModal({
         </div>
 
         {/* Footer Actions */}
+        {cropMode ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4 bg-slate-900 border-t border-slate-800 shrink-0">
+            <div className="flex items-center gap-2">
+              {/* ★ 这两个出口是用户对功能失去信任时的泄压阀。堵死了他们只会整个不用, */}
+              {/*   所以必须一键可达,不能藏进二级菜单。 */}
+              <Button
+                variant="secondary" size="sm" disabled={savingCrop}
+                onClick={() => setDraftQuad(current.crop?.quad ?? seedQuad())}
+                iconLeft={<Undo2 size={15} />}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-100 border-slate-700 text-xs sm:text-sm"
+              >
+                重置
+              </Button>
+              <Button
+                variant="secondary" size="sm" disabled={savingCrop}
+                onClick={() => void handleCropSave(null)}
+                iconLeft={<Ban size={15} />}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-100 border-slate-700 text-xs sm:text-sm"
+              >
+                本页不裁
+              </Button>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost" size="sm" disabled={savingCrop}
+                onClick={() => { setCropMode(false); setDraftQuad(null); }}
+                className="text-slate-300 hover:text-white hover:bg-slate-800 text-xs sm:text-sm"
+              >
+                取消
+              </Button>
+              <Button
+                variant="primary" size="md" disabled={savingCrop} loading={savingCrop}
+                onClick={() => void handleCropSave(draftQuad ? { quad: draftQuad, source: 'human' } : null)}
+                iconLeft={<Check size={17} />}
+                className="bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs sm:text-sm px-5"
+              >
+                完成
+              </Button>
+            </div>
+          </div>
+        ) : (
         <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4 bg-slate-900 border-t border-slate-800 shrink-0">
           {/* Rotation & Delete Controls */}
           <div className="flex items-center gap-2">
@@ -194,6 +281,16 @@ export function DraftPreviewModal({
                   className="bg-slate-800 hover:bg-slate-700 text-slate-100 border-slate-700 text-xs sm:text-sm"
                 >
                   向右旋转 90°
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={rotating}
+                  onClick={() => { setDraftQuad(current.crop?.quad ?? seedQuad()); setCropMode(true); }}
+                  iconLeft={<Crop size={15} />}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-100 border-slate-700 text-xs sm:text-sm"
+                >
+                  调整识别范围
                 </Button>
               </>
             )}
@@ -234,6 +331,7 @@ export function DraftPreviewModal({
             </Button>
           </div>
         </div>
+        )}
       </div>
     </div>
   );

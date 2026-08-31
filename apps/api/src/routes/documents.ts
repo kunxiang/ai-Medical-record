@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   CaptureSidecar, DocumentCreate, DocumentDetailResponse, DocumentOut, Encounter,
+  type PageCropT,
   MAX_UPLOAD_BYTES, MIME_TO_EXT,
   MULTIPART_THRESHOLD_BYTES,
   PageSidecar, PageUrlResponse, PresignRequest, PresignResponse, Uuid,
@@ -164,6 +165,7 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
         pageNo: number; captureOrder: number; finalKey: string; mime: Mime; byteSize: number;
         sha256: string; width: number; height: number; incomingKey: string; filename: string;
         exif: { captured_at: string | null; orientation: number | null } | null;
+        crop: PageCropT | null;
       };
       const staged: PageStaged[] = [];
       for (const p of input.pages) {
@@ -186,7 +188,7 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
             staged.push({
               pageNo: p.page_no, captureOrder: p.capture_order, finalKey, mime, byteSize: final.byteSize,
               sha256: f.sha256, width: p.width, height: p.height,
-              incomingKey: f.incomingKey, filename: f.filename, exif: p.exif,
+              incomingKey: f.incomingKey, filename: f.filename, exif: p.exif, crop: p.crop,
             });
             continue;
           }
@@ -221,7 +223,7 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
         staged.push({
           pageNo: p.page_no, captureOrder: p.capture_order, finalKey, mime, byteSize: f.byteSize,
           sha256: f.sha256, width: p.width, height: p.height,
-          incomingKey: f.incomingKey, filename: f.filename, exif: p.exif,
+          incomingKey: f.incomingKey, filename: f.filename, exif: p.exif, crop: p.crop,
         });
       }
       crashPoint('after-copy'); // A8 崩溃注入点(仅测试)
@@ -256,8 +258,11 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
           canonicalJson(pageJson), app,
         );
       }
+      // ★ 只在真有裁切时才升 2.1(见 CaptureSidecar 注释):无裁切时字节与加这个功能之前
+      //   完全一致,跨部署的续跑请求才不会在 putWormIdempotent 的逐字节比对上炸掉。
+      const anyCrop = staged.some((s) => s.crop !== null);
       const capture = CaptureSidecar.parse({
-        schema_version: '2.0', document_id: documentId, short_id: docShortId,
+        schema_version: anyCrop ? '2.1' : '2.0', document_id: documentId, short_id: docShortId,
         person: { slug: personSlug, name: personRow.displayName, confirmed_by: input.confirmed_by },
         captured_at: input.captured_at, capture_date: captureDate,
         source: input.source, uploaded_by: accountId,
@@ -267,6 +272,8 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
           page_no: s.pageNo, capture_order: s.captureOrder,
           file: `page-${String(s.pageNo).padStart(2, '0')}.${MIME_TO_EXT[s.mime]}`,
           sha256: s.sha256, bytes: s.byteSize, mime: s.mime, width: s.width, height: s.height,
+          // undefined ⇒ canonicalJson 直接省略该键(JSON.stringify 语义),2.0 的字节形状得以保持
+          ...(s.crop ? { crop: s.crop } : {}),
         })),
         created_at: createdAt,
       });
@@ -291,6 +298,7 @@ export function registerDocumentRoutes(app: FastifyInstance): void {
             id: newId(), documentId, pageNo: s.pageNo, storageKey: s.finalKey,
             contentSha256: s.sha256, byteSize: s.byteSize, mimeType: s.mime,
             width: s.width, height: s.height, captureOrder: s.captureOrder,
+            crop: s.crop,
             originCaptureDocumentId: documentId, originCaptureOrder: s.captureOrder,
             originObjectSha256: s.sha256,
           })),

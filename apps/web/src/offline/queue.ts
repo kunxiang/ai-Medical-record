@@ -246,6 +246,8 @@ async function processOne(rec: CaptureRecord): Promise<void> {
         return {
           upload_id: u.upload_id, page_no: u.page_no, capture_order: b.capture_order,
           width: b.width, height: b.height, sha256: b.sha256, exif: b.exif,
+          // undefined(还没检测完)与 null(检测过但不裁)对服务端是同一件事:退回整幅
+          crop: b.crop ?? null,
         };
       }),
       client_document_id: rec.client_document_id,

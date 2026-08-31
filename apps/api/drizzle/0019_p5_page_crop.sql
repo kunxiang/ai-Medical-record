@@ -1,0 +1,1 @@
+ALTER TABLE "document_page" ADD COLUMN "crop" jsonb;

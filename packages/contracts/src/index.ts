@@ -1,6 +1,7 @@
 export * from './canonical.js';
 export * from './scalars.js';
 export * from './enums.js';
+export * from './crop.js';
 export * from './person.js';
 export * from './document.js';
 export * from './encounter.js';

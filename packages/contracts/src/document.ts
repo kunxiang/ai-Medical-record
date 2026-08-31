@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { Uuid, IsoDate, IsoDateTime, DocShortId, Sha256Hex } from './scalars.js';
 import { DocumentSource, DocumentStatus, DocType, MimeType, PersonCheck } from './enums.js';
+import { PageCrop } from './crop.js';
 import { canonicalJsonString } from './canonical.js';
 import { EffectiveDocumentMetadata } from './metadata.js';
 import { MetadataSuggestion } from './metadata.js';
@@ -50,6 +51,10 @@ export const PageIn = z.object({
   height: z.number().int().min(1),
   sha256: Sha256Hex,
   exif: PageExif.nullable().default(null),
+  // 人工确认过的裁切角点(P5-01)。null = 未检测到 / 检测不可信 / 用户选择不裁,
+  // 三种情况服务端行为一致:退回整幅。旧版采集端不发这个字段 ⇒ default(null)。
+  // ★ 不进 idempotencyFingerprint:文档的身份是原件字节,不是人对裁切的意见。
+  crop: PageCrop.nullable().default(null),
 });
 
 // captured_at ∈ [2000-01-01, now+24h] 的校验需要"现在",由服务端在 defineRoute 后追加执行

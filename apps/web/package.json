@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@amr/contracts": "workspace:*",
+    "@techstark/opencv-js": "5.0.0-release.1",
     "clsx": "^2.1.1",
     "exifr": "^7.1.3",
     "idb": "^8.0.0",

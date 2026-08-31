@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { Uuid, IsoDate, IsoDateTime, DocShortId, PersonSlug, Sha256Hex } from './scalars.js';
 import { DocumentSource, MimeType } from './enums.js';
+import { PageCrop } from './crop.js';
 
 // spec m0-03 §4。全部 .strict() —— 未知键即失败。
 
@@ -14,12 +15,20 @@ export const CapturePage = z
     mime: MimeType,
     width: z.number().int().min(1),
     height: z.number().int().min(1),
+    // 人工确认的裁切角点(P5-01)。**人工输入 ⇒ L1**(ADR-045:L1 = 原件 + 拍摄事实 + 人工输入)。
+    // 存的是角点不是图:校准图是「原件 + 角点」的确定性函数,由 L2 随时重生成。
+    // 检测器自己提出的那个框属于机器意见,归 derived/(L2,可丢),不进这里。
+    // 缺省 = 未裁。2.0 的对象没有这个键,故用 optional 而非 nullable —— 见下方版本说明。
+    crop: PageCrop.optional(),
   })
   .strict();
 
 export const CaptureSidecar = z
   .object({
-    schema_version: z.literal('2.0'),
+    // 2.1 起 pages[].crop 可选。**读接受 2.0/2.1,写只在真有裁切时才升 2.1** ——
+    // putWormIdempotent 做逐字节比对且不一致即抛错,无条件升版会让"部署跨越了一次
+    // 中断上传"的续跑请求算出不同字节而炸掉。无裁切时字节与 2.0 时代完全一致。
+    schema_version: z.enum(['2.0', '2.1']),
     document_id: Uuid,
     short_id: DocShortId,
     person: z

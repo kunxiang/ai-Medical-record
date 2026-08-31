@@ -1,5 +1,6 @@
 import { uuidv7 } from 'uuidv7';
-import { MAX_UPLOAD_BYTES } from '@amr/contracts';
+import { MAX_UPLOAD_BYTES, type PageCropT } from '@amr/contracts';
+import { rotateQuad } from './crop.js';
 import {
   blobsOf, deleteCaptureCompletely, getBlob, getCapture, putBlob, putCapture,
   withDb, type BlobRecord, type CaptureRecord,
@@ -228,6 +229,11 @@ export async function rotateDraftPage(
     sha256: sha,
     width: rotated.width,
     height: rotated.height,
+    // ★ 角点必须跟着图一起转。少了这一步就是一个必然发生的静默 bug:
+    //   quad 留在旧坐标系里,转 90° 之后框跑到画面外或只框住一条边,而且不报错。
+    //   注:rotateBlob 用 canvas 重编码,产物不带 EXIF ⇒ 新 blob 的"旋正后坐标系"
+    //   就是它自己的像素坐标系,与服务端 .rotate()(对无 EXIF 图为空操作)一致。
+    crop: blobRec.crop ? { ...blobRec.crop, quad: rotateQuad(blobRec.crop.quad, degrees) } : blobRec.crop,
   };
   await putBlob(updatedBlobRec);
 
@@ -241,6 +247,26 @@ export async function rotateDraftPage(
   }
 
   return { blob: rotated.blob, width: rotated.width, height: rotated.height, sha256: sha };
+}
+
+/**
+ * 写入本页的裁切结果(P5-01)。
+ * `crop === null` 表示"检测过了,但不裁" —— 与"还没检测"(undefined)在 UI 上必须区分开。
+ * 与 rotateDraftPage 一样清空 batch:presign 时要带上最新的页信息重新申请。
+ */
+export async function setPageCrop(
+  clientDocumentId: string,
+  pageNo: number,
+  crop: PageCropT | null,
+): Promise<void> {
+  const blobRec = await getBlob(clientDocumentId, pageNo);
+  if (!blobRec) return;
+  await putBlob({ ...blobRec, crop });
+
+  const captureRec = await getCapture(clientDocumentId);
+  if (captureRec && captureRec.batch !== null) {
+    await putCapture({ ...captureRec, batch: null, next_attempt_at: 0 });
+  }
 }
 
 /** 删除草稿或待上传记录中的单页并重新排列页码序号 */

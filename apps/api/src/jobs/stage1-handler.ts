@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { and, eq, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
-import { S1Artifact, Stage1Out, type Stage1OutT } from '@amr/contracts';
+import { PageCrop, S1Artifact, Stage1Out, type PageCropT, type Stage1OutT } from '@amr/contracts';
 import {
   S1Error, assertBatchPages, callS1, callS1Pdf, getPrompt,
   mergeBatches, planBatches, S1_PROMPT_ID, type S1PageInput,
@@ -30,7 +30,10 @@ export class Stage1Failure extends Error {
 interface DocContext {
   documentId: string; shortId: string; personId: string; personSlug: string;
   displayName: string; namePinyin: string | null; timezone: string;
-  pages: Array<{ pageNo: number; storageKey: string; mimeType: string; byteSize: number }>;
+  pages: Array<{
+    pageNo: number; storageKey: string; mimeType: string; byteSize: number;
+    crop: PageCropT | null;
+  }>;
 }
 
 async function loadContext(documentId: string): Promise<DocContext | null> {
@@ -41,6 +44,7 @@ async function loadContext(documentId: string): Promise<DocContext | null> {
       timezone: account.timezone,
       pageNo: documentPage.pageNo, storageKey: documentPage.storageKey,
       mimeType: documentPage.mimeType, byteSize: documentPage.byteSize,
+      crop: documentPage.crop,
     })
     .from(documentPage)
     .innerJoin(document, eq(document.id, documentPage.documentId))
@@ -58,8 +62,17 @@ async function loadContext(documentId: string): Promise<DocContext | null> {
     timezone: first.timezone,
     pages: rows.map((r) => ({
       pageNo: r.pageNo, storageKey: r.storageKey, mimeType: r.mimeType, byteSize: r.byteSize,
+      // jsonb 在类型层是 unknown,且删库重建会重新回填 —— 一律过 schema,坏数据退回不裁
+      crop: parseCrop(r.crop),
     })),
   };
+}
+
+/** jsonb 列没有类型保证。解析失败就当没裁 —— 整幅是已知可用的回退。 */
+function parseCrop(raw: unknown): PageCropT | null {
+  if (raw === null || raw === undefined) return null;
+  const parsed = PageCrop.safeParse(raw);
+  return parsed.success ? parsed.data : null;
 }
 
 /** 送进模型的必须是 ai 派生物,不是 L1 原件(ADR-050)。
@@ -71,6 +84,9 @@ async function prepareImages(ctx: DocContext): Promise<S1PageInput[]> {
     const { key } = await ensureDerivative({
       personSlug: ctx.personSlug, docShortId: ctx.shortId, pageNo: p.pageNo,
       variant: 'ai', sourceKey: p.storageKey, mimeType: p.mimeType,
+      // 人工确认的裁切框。模型的像素预算是死的(该供应商归一到固定 384 图像 token),
+      // 裁掉背景是唯一还能提高每字符像素数的杠杆;顺带缩小跨境回拉的体积。
+      crop: p.crop,
     });
     // 预签名有效期 ≥900s(m2-02 §3.1):模型服务端要去 fetch 它
     out.push({ pageNo: p.pageNo, imageUrl: await presignGetKey(key, 900) });

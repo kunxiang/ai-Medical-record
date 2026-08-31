@@ -325,6 +325,17 @@ export function QueuePanel({
             setQueueVersion((v) => v + 1);
             await onChanged();
           }}
+          onCropChange={async (pageNo, crop) => {
+            // 队列里的都还没上传(pending / failed_terminal),此时改识别范围仍然算数;
+            // setPageCrop 会清空 batch,重试时按最新页信息重新申请 presign。
+            const { setPageCrop } = await import('../../offline/capture.js');
+            await setPageCrop(modalState.docId, pageNo, crop);
+            const { blobsOf } = await import('../../offline/db.js');
+            const updatedBlobs = await blobsOf(modalState.docId, modalState.blobs.length);
+            setModalState((prev) => (prev ? { ...prev, blobs: updatedBlobs } : null));
+            setQueueVersion((v) => v + 1);
+            await onChanged();
+          }}
           onDelete={async (pageNo) => {
             const { deleteDraftPage } = await import('../../offline/capture.js');
             const remaining = await deleteDraftPage(modalState.docId, pageNo);

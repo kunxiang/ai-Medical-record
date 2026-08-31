@@ -1,6 +1,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import type {
   ContextAnswerInputT, ContextMediaMimeT, ContextQuestionT, ContextStageT, ContextTemplateSnapshotT,
+  PageCropT,
 } from '@amr/contracts';
 
 // spec m1-04 §1:四个 store。原件 blob 与元数据分表 —— 元数据频繁读写(状态机、
@@ -65,6 +66,14 @@ export interface BlobRecord {
   capture_order: number;
   filename: string;
   exif: { captured_at: string | null; orientation: number | null } | null;
+  /**
+   * 人工确认的裁切角点(P5-01)。归一化 [0,1],**旋正后**坐标系。
+   * undefined = 还没检测过;null = 检测不到 / 不可信 / 用户明确选择不裁。
+   * 两者上传时都发 null(服务端行为一致:退回整幅),区别只对 UI 有意义 ——
+   * "还在检测中"和"检测过了没有框"要显示成不同的东西。
+   * IndexedDB 不校验记录形状,故这里加字段无需升 DB 版本。
+   */
+  crop?: PageCropT | null;
 }
 
 export interface PersonCacheRecord {

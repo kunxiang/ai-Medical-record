@@ -152,6 +152,7 @@ for (const [shortId, st] of docState) {
       upload_id: '00000000-0000-7000-8000-000000000000', // 不进指纹,占位
       page_no: pg.page_no, capture_order: pg.capture_order,
       width: pg.width, height: pg.height, sha256: pg.sha256, exif: null,
+      crop: null,   // 不进指纹(文档身份是原件字节,不是人对裁切的意见)⇒ 占位即可
     })),
   });
   await sql`
@@ -170,10 +171,12 @@ for (const [shortId, st] of docState) {
     const storageKey = pg.file.startsWith('people/') ? pg.file : st.prefix + pg.file;
     await sql`
       insert into document_page (id, document_id, page_no, storage_key, content_sha256, byte_size,
-                                 mime_type, width, height, capture_order, origin_capture_document_id,
+                                 mime_type, width, height, capture_order, crop,
+                                 origin_capture_document_id,
                                  origin_capture_order, origin_object_sha256)
       values (${uuidv7()}, ${cap.document_id}, ${pg.page_no}, ${storageKey}, ${pg.sha256},
               ${pg.bytes}, ${pg.mime}, ${pg.width}, ${pg.height}, ${pg.capture_order},
+              ${pg.crop === undefined ? null : sql.json(pg.crop)},
               ${cap.document_id}, ${pg.capture_order}, ${pg.sha256})
       on conflict (document_id, page_no) do nothing
     `;
