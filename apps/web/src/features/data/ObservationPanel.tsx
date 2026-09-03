@@ -6,7 +6,7 @@ import {
 } from '@amr/contracts';
 import {
   Activity, AlertTriangle, Archive, Edit3, ExternalLink, Link2, LoaderCircle,
-  Plus, Save, Search, WandSparkles,
+  Plus, Save, Search, ShieldAlert, ShieldCheck, ShieldQuestion, WandSparkles,
 } from 'lucide-react';
 import { uuidv7 } from 'uuidv7';
 import type { Person } from '../../App.js';
@@ -59,6 +59,27 @@ function numberOrNull(value: string): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
+
+
+/**
+ * 可信度徽章(ADR-054)。让"这个数字凭什么可信"一眼可见。
+ * confirmed/corrected 不出徽章 —— 那是人工录入或人工修正的默认情形。
+ */
+const VERIFICATION_BADGE: Partial<Record<string, {
+  label: string; variant: 'info' | 'warning' | 'danger'; icon: JSX.Element;
+}>> = {
+  machine_verified: {
+    label: '机器校验', variant: 'info', icon: <ShieldCheck size={12} />,
+  },
+  unverified: {
+    // 提取出来了,但单据上没有可交叉验算的冗余 —— 没有人、也没有机器核对过。
+    label: '未经验证', variant: 'warning', icon: <ShieldQuestion size={12} />,
+  },
+  check_failed: {
+    // 自洽等式没算平:该行或同一等式里的另一行很可能读错了。
+    label: '校验未通过', variant: 'danger', icon: <ShieldAlert size={12} />,
+  },
+};
 
 export function ObservationPanel({
   person, encounters, detail = null, compact = false, onOpenSource,
@@ -230,8 +251,8 @@ export function ObservationPanel({
     <Card className="space-y-4" data-testid="observation-panel">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="flex items-center gap-2 text-base font-bold text-ink"><Activity size={18} className="text-brand-600" />已确认指标</h2>
-          <p className="text-xs text-muted">只显示人工录入、人工接受和确定性派生；待处理建议不会混入。</p>
+          <h2 className="flex items-center gap-2 text-base font-bold text-ink"><Activity size={18} className="text-brand-600" />已入库指标</h2>
+          <p className="text-xs text-muted">每一行都标注了它凭什么可信：<strong>机器校验</strong>＝被化验单自身的算术等式验算通过；<strong>未经验证</strong>＝单据上没有可交叉验算的冗余；<strong>校验未通过</strong>＝等式没算平，很可能读错了。发现不对用行内的「修正」。</p>
         </div>
         <div className="flex items-center gap-2">
           {activeMapping.length > 0 && <Badge variant="warning">{activeMapping.length} 项待映射</Badge>}
@@ -245,7 +266,7 @@ export function ObservationPanel({
       {loading ? (
         <div className="flex min-h-32 items-center justify-center gap-2 text-sm text-muted"><LoaderCircle className="animate-spin" size={17} />正在加载指标…</div>
       ) : observations.length === 0 ? (
-        <EmptyState variant="inline" icon={<Activity />} title="还没有已确认指标" description="可以手工录入；智能识别不是必需步骤。" />
+        <EmptyState variant="inline" icon={<Activity />} title="还没有已入库指标" description="可以手工录入；智能识别不是必需步骤。" />
       ) : (
         <div className={compact ? 'max-h-80 overflow-y-auto' : ''}>
           <div className="divide-y divide-line rounded-xl border border-line bg-white">
@@ -256,6 +277,16 @@ export function ObservationPanel({
                     <strong className="truncate text-sm text-ink">{value.local_name}</strong>
                     {value.concept_code ? <Badge variant="success">{value.concept_code}</Badge> : <Badge variant="warning">待映射</Badge>}
                     {value.is_derived && <Badge variant="info" icon={<WandSparkles size={12} />}>确定性派生</Badge>}
+                    {/* review_status 是唯一诚实区分「人看过」与「机器算过」的地方(ADR-053)。
+                        不标出来,用户就无从判断眼前这个数字有没有被人核对过。 */}
+                    {VERIFICATION_BADGE[value.review_status] && (
+                      <Badge
+                        variant={VERIFICATION_BADGE[value.review_status]!.variant}
+                        icon={VERIFICATION_BADGE[value.review_status]!.icon}
+                      >
+                        {VERIFICATION_BADGE[value.review_status]!.label}
+                      </Badge>
+                    )}
                   </div>
                   <p className="mt-1 text-xs text-muted">{value.observed_on}{value.time_precision === 'date' ? ' · 仅日期' : ''} · {value.specimen_label || value.specimen || '标本未记录'}</p>
                 </div>
@@ -297,32 +328,9 @@ export function ObservationPanel({
         </div>
       )}
 
-      {detail && suggestions.some((item) => item.state === 'proposed' || item.state === 'partially_accepted') && (
-        <div className="space-y-3 rounded-2xl border border-brand-200 bg-brand-50/50 p-4" data-testid="observation-suggestions">
-          <div><h3 className="flex items-center gap-2 text-sm font-bold text-ink"><WandSparkles size={16} />历史辅助建议</h3><p className="text-xs text-muted">辅助功能关闭时仍可审核历史结果；只有勾选并确认的字段会复制为人工事实。</p></div>
-          {suggestions.filter((item) => item.state === 'proposed' || item.state === 'partially_accepted').map((suggestion) => (
-            <div key={suggestion.id} className="space-y-3 rounded-xl border border-brand-200 bg-white p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-xs text-muted">{suggestion.provenance.plugin_id}@{suggestion.provenance.plugin_version} · {suggestion.payload.rows.length} 行</span><Badge variant="info">待人工确认</Badge></div>
-              <div className="divide-y divide-line rounded-lg border border-line">
-                {suggestion.payload.rows.map((row) => {
-                  const accepted = suggestion.accepted_row_ids.includes(row.row_id);
-                  const override = suggestionOverrides[suggestion.id]?.[row.row_id]
-                    ?? { value_raw: row.draft.value_raw, unit_raw: row.draft.unit_raw ?? '' };
-                  return (
-                    <label key={row.row_id} className="grid gap-2 p-2 text-xs sm:grid-cols-[auto_minmax(8rem,1fr)_minmax(7rem,.7fr)_minmax(6rem,.5fr)] sm:items-center">
-                      <input type="checkbox" disabled={accepted} checked={accepted || !!suggestionSelections[suggestion.id]?.[row.row_id]} onChange={(event) => setSuggestionSelections((current) => ({ ...current, [suggestion.id]: { ...current[suggestion.id], [row.row_id]: event.target.checked } }))} />
-                      <span><strong className="text-ink">{row.draft.local_name}</strong>{accepted && <Badge variant="success" className="ml-2">已接受</Badge>}</span>
-                      <Input value={override.value_raw} disabled={accepted} aria-label={`${row.draft.local_name} 建议结果`} onChange={(event) => setSuggestionOverrides((current) => ({ ...current, [suggestion.id]: { ...current[suggestion.id], [row.row_id]: { ...override, value_raw: event.target.value } } }))} />
-                      <Input value={override.unit_raw} disabled={accepted} aria-label={`${row.draft.local_name} 建议单位`} onChange={(event) => setSuggestionOverrides((current) => ({ ...current, [suggestion.id]: { ...current[suggestion.id], [row.row_id]: { ...override, unit_raw: event.target.value } } }))} />
-                    </label>
-                  );
-                })}
-              </div>
-              <div className="flex justify-end"><Button variant="primary" size="sm" loading={busy === suggestion.id} onClick={() => void acceptSuggestion(suggestion)}>接受所选行/字段</Button></div>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* 建议接受区块已移除(ADR-054)。提取行现在全部入库并各自带可信度,
+          不再要求用户对着看不懂的数字点"接受" —— 那次点击既不产生验证,
+          又会把值记成"已由某某确认"。发现某行不对时用行内的「修正」即可。 */}
 
       {workbench && <ObservationWorkbench person={person} detail={detail} encounters={encounters} onClose={() => setWorkbench(false)} onSaved={() => void load()} />}
 

@@ -45,6 +45,23 @@ function displayValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
+/**
+ * 弹窗标题。**绝不回退到 original_filename** —— 手机相机给的是 `image.jpg`,
+ * 对人没有任何意义,却是用户点开这份报告后看到的第一行字。
+ * 系统其实知道这是什么:S1 已经读出了类型、机构和日期,用它们拼一个人话标题。
+ */
+function documentTitle(detail: DocumentDetailResponseT | null): string {
+  if (!detail) return '文档详情';
+  const manual = detail.effective_metadata.title.value;
+  if (manual) return manual;
+  const parts = [
+    DOC_TYPES.find(([code]) => code === (detail.effective_metadata.doc_type.value ?? 'unknown'))?.[1] ?? '文档',
+    detail.effective_metadata.facility_name.value,
+    detail.effective_metadata.sampled_on.value ?? detail.capture_date,
+  ].filter((part): part is string => Boolean(part));
+  return parts.join(' · ');
+}
+
 export function DocumentDetailDialog({
   documentId,
   person,
@@ -244,7 +261,7 @@ export function DocumentDetailDialog({
       open
       onClose={onClose}
       size="full"
-      title={detail?.effective_metadata.title.value ?? detail?.original_filename ?? '文档详情'}
+      title={documentTitle(detail)}
       description={detail ? `${detail.short_id} · ${detail.pages.length} 页 · 采集于 ${detail.capture_date}` : '正在读取档案'}
       className="max-w-6xl"
     >
