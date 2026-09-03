@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { DocType } from './enums.js';
 import { DocShortId, IsoDate, IsoDateTime, LocalOrOffsetDateTime } from './scalars.js';
+import { Stage2ObservationModelOut } from './observation.js';
 
 // spec m2-03 §1:Stage 1 输出。全部 .strict() —— 未知键即失败,与 sidecar 同一纪律。
 // 单一出处:packages/ai 的 prompt 与调用点一律引用此处,禁止重复维护枚举。
@@ -85,6 +86,34 @@ export const S1Artifact = z
   .strict();
 
 export type Stage1OutT = z.infer<typeof Stage1Out>;
+
+/** Stage 2(化验单结构化提取)的 L2 工件。与 S1 同规格:模型原始产出必须可审计、可重放。
+ *  输入不是图而是 S1 的 full_text,故记 `source_s1_artifact_key` 指回上游。 */
+export const S2Artifact = z
+  .object({
+    schema_version: z.literal('1.0'),
+    stage: z.literal('s2'),
+    document_short_id: DocShortId,
+    produced_at: IsoDateTime,
+    model: z.string(),
+    prompt_id: z.string(),
+    prompt_version: z.number().int().min(1),
+    prompt_sha256: z.string().regex(/^[0-9a-f]{64}$/),
+    effort: z.string(),
+    /** 上游 S1 工件 key —— Stage 2 读的是它的 full_text,不重新看图 */
+    source_s1_artifact_key: z.string().min(1),
+    usage: z
+      .object({
+        input_tokens: z.number().int(),
+        output_tokens: z.number().int(),
+        cache_read_input_tokens: z.number().int(),
+        cache_creation_input_tokens: z.number().int(),
+      })
+      .strict(),
+    output: Stage2ObservationModelOut,
+  })
+  .strict();
+export type S2ArtifactT = z.infer<typeof S2Artifact>;
 
 /** 模型响应的**解析**层。线上契约(Stage1Out)保持严格 —— 它同时是发给模型的 json_schema
  *  与 artifact 的存储类型,改动会让请求指纹漂移、既有 cassette 基线全部失配。

@@ -22,3 +22,6 @@ export {
   buildEncounterRequest, callEncounterSuggestion, EncounterSuggestionError, ENCOUNTER_PROMPT_ID,
   type EncounterSuggestionResult,
 } from './encounter.js';
+export {
+  buildS2Request, callS2, Stage2Error, S2_PROMPT_ID, type Stage2Result,
+} from './stage2.js';

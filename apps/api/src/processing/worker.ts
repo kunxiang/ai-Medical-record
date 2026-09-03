@@ -1,5 +1,6 @@
 import type { ProcessingCapabilityT } from '@amr/contracts';
 import { handleStage1, Stage1Failure } from '../jobs/stage1-handler.js';
+import { handleStage2, Stage2Failure } from '../jobs/stage2-handler.js';
 import { handleEncounterSuggest, EncounterJobFailure } from '../normalization/encounter-service.js';
 import { handleFacilityNormalize, FacilityJobFailure } from '../normalization/facility-service.js';
 import { backfillDocumentProcessing } from './backfill.js';
@@ -15,7 +16,7 @@ const RECLAIM_MS = 60_000;
 const BACKFILL_MS = 5 * 60_000;
 
 export const LEGACY_PLUGIN_CAPABILITIES = [
-  'document_metadata_suggest', 'facility_suggest', 'encounter_suggest',
+  'document_metadata_suggest', 'facility_suggest', 'encounter_suggest', 'observation_suggest',
 ] as const satisfies readonly ProcessingCapabilityT[];
 
 async function runOne(job: ClaimedProcessingJob, input: {
@@ -40,11 +41,20 @@ async function runOne(job: ClaimedProcessingJob, input: {
       await finishProcessingJob({ id: job.id, instance: input.instance, state: 'done' });
       return;
     }
+    if (job.capability === 'observation_suggest') {
+      const { resultKey } = await handleStage2(job.subjectId, {
+        pluginId: input.pluginId, pluginVersion: input.pluginVersion,
+        inputRevision: job.inputRevision, inputSha256: job.inputSha256,
+      });
+      await finishProcessingJob({ id: job.id, instance: input.instance, state: 'done', resultKey });
+      return;
+    }
     await finishProcessingJob({ id: job.id, instance: input.instance, state: 'unsupported' });
   } catch (error) {
     if (error instanceof Stage1Failure || error instanceof FacilityJobFailure
-        || error instanceof EncounterJobFailure) {
-      if (error instanceof Stage1Failure && error.terminal === null) {
+        || error instanceof EncounterJobFailure || error instanceof Stage2Failure) {
+      if ((error instanceof Stage1Failure || error instanceof Stage2Failure)
+          && error.terminal === null) {
         await retryProcessingJob({ id: job.id, instance: input.instance, error: { ...error.detail } });
       } else {
         await finishProcessingJob({

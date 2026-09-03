@@ -15,3 +15,4 @@ export * from './derivations.js';
 export * from './derivation-projection.js';
 export * from './variation.js';
 export * from './downsampling.js';
+export * from './cross-checks.js';

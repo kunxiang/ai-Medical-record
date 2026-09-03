@@ -141,6 +141,20 @@
       "when": 1788142786541,
       "tag": "0019_p5_page_crop",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1788423642681,
+      "tag": "0020_m5_machine_verified",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1788429029102,
+      "tag": "0021_m5_verification_levels",
+      "breakpoints": true
     }
   ]
 }

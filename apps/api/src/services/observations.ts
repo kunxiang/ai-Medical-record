@@ -102,17 +102,25 @@ async function assertOptionalReferences(tx: Tx, input: {
   }
 }
 
+/** 机器产生的可信度状态。它们共同的含义是"没有人看过这一行"。 */
+const MACHINE_REVIEW_STATUSES = new Set(['machine_verified', 'unverified', 'check_failed']);
+
 type NormalizedFact = Omit<typeof observation.$inferInsert, 'id' | 'personId' | 'createdAt' | 'updatedAt'> & {
   warnings: Array<'unknown_unit' | 'unmapped_concept' | 'source_unavailable'>;
   conceptReference: ReturnType<typeof medicalConceptOut>;
 };
 
-async function normalizeFact(tx: Tx, input: {
+export async function normalizeFact(tx: Tx, input: {
   personId: string; accountId: string; row: ObservationBatchRowT;
   defaults: ObservationBatchCreateRequestT['defaults']; path: Array<string | number>;
   existing?: ObservationRow;
   source?: 'manual' | 'imported' | 'accepted_suggestion';
   sourceRef?: Record<string, unknown> | null;
+  /**
+   * m5-02:机器写入的可信度。三种都表示**没有人逐项核对过**,故 reviewed_by 必须为空。
+   * 不传 = 人工写入,走 confirmed/corrected。
+   */
+  machineStatus?: 'machine_verified' | 'unverified' | 'check_failed';
 }): Promise<NormalizedFact> {
   const value = input.row;
   const base = input.existing;
@@ -213,7 +221,16 @@ async function normalizeFact(tx: Tx, input: {
     reportedAt: reportedAt ? new Date(reportedAt) : null, labFacilityId,
     ...source, source: base?.source ?? input.source ?? 'manual',
     sourceRef: base?.sourceRef ?? input.sourceRef ?? null,
-    reviewStatus: base ? 'corrected' : 'confirmed', reviewedBy: input.accountId,
+    // ★ 只有人真的看过某一行,才能写 confirmed/corrected 并记下 reviewed_by。
+    //   机器交叉验证通过但无人逐项核对的行写 machine_verified 且 reviewed_by 留空 ——
+    //   让用户对着几十个数字点一次"接受"并不产生验证,把它记成"已由某某确认"是替用户签字。
+    //   数据库的 obs_machine_verified_has_no_reviewer 约束会强制这一点。
+    // 机器写入(新建,或对本来就是机器状态的行做机器回填)保持机器状态、reviewed_by 为空。
+    // 只有人真的动过某一行,才写 confirmed/corrected 并记下是谁 —— 一次没看数据的点击不算。
+    ...(input.machineStatus
+      && (!base || MACHINE_REVIEW_STATUSES.has(base.reviewStatus))
+      ? { reviewStatus: input.machineStatus, reviewedBy: null }
+      : { reviewStatus: base ? ('corrected' as const) : ('confirmed' as const), reviewedBy: input.accountId }),
     reviewedAt: at, consistencyFlags, isDerived: base?.isDerived ?? false,
     derivedFormula: base?.derivedFormula ?? null, calculationVersion: base?.calculationVersion ?? null,
     derivationKey: base?.derivationKey ?? null,
@@ -270,6 +287,8 @@ export async function persistObservationBatch(input: {
   source?: 'manual' | 'imported' | 'accepted_suggestion';
   sourceRefs?: ReadonlyMap<string, Record<string, unknown>>;
   suggestionSnapshot?: Record<string, unknown> | null;
+  /** m5-02:client_row_id → 机器判定的可信度。命中的行写机器状态且 reviewed_by 为空。 */
+  machineStatusByRowId?: ReadonlyMap<string, 'machine_verified' | 'unverified' | 'check_failed'>;
 }) {
   const existing = await input.tx.select({ clientRowId: observation.clientRowId })
     .from(observation).where(and(
@@ -290,6 +309,7 @@ export async function persistObservationBatch(input: {
       personId: input.personId, accountId: input.accountId, row,
       defaults: input.body.defaults, path: ['observations', index], source: input.source,
       sourceRef: input.sourceRefs?.get(row.client_row_id) ?? null,
+      machineStatus: input.machineStatusByRowId?.get(row.client_row_id),
     });
     const { warnings: rowWarnings, conceptReference, ...values } = normalized;
     const inserted = (await input.tx.insert(observation).values({

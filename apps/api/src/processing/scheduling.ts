@@ -110,6 +110,31 @@ export async function scheduleFacilitySuggestion(
   });
 }
 
+/**
+ * Stage 2(化验结果结构化)入队。只在 S1 把文档判为 lab_report 之后调用。
+ *
+ * input_sha256 取 S1 工件 key —— 它编码了 prompt 版本,所以 S1 换 prompt 重跑时
+ * 指纹自然变化、产出新建议;S1 没变则不会重复烧一次模型调用。
+ */
+export async function scheduleObservationSuggestion(
+  tx: Tx,
+  input: { documentId: string; personId: string; s1ArtifactKey: string },
+): Promise<{ id: string; inserted: boolean } | null> {
+  const plugin = await activePluginFor(tx, 'observation_suggest');
+  if (!plugin) return null;
+  return enqueueProcessing(tx, {
+    capability: 'observation_suggest',
+    target_plugin_id: plugin.pluginId,
+    target_plugin_version: plugin.pluginVersion,
+    subject_type: 'document',
+    subject_id: input.documentId,
+    person_id: input.personId,
+    input_revision: 0,
+    input_sha256: sha256({ s1_artifact_key: input.s1ArtifactKey }),
+    run_generation: 0,
+  });
+}
+
 export async function scheduleEncounterSuggestion(
   tx: Tx,
   personId: string,

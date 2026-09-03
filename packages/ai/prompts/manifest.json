@@ -28,5 +28,11 @@
     "version": 3,
     "file": "s1/s1-classify@3.md",
     "sha256": "11b852c39456b47451bab1deeca2e204488b85244200e728ac3a60d0616373b9"
+  },
+  {
+    "id": "s2-lab-observations",
+    "version": 1,
+    "file": "s2/s2-lab-observations@1.md",
+    "sha256": "4314ca48c565d97790ac77707e97f79150bcf5e29a1002de9917fee61bd28e59"
   }
 ]

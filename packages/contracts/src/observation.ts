@@ -7,7 +7,24 @@ export const ObservationDateSource = z.enum(['manual', 'document_sampled', 'docu
 export const ObservationComparator = z.enum(['<', '<=', '=', '>=', '>']);
 export const ObservationResultKind = z.enum(['measured', 'calculated', 'input_parameter']);
 export const ObservationSource = z.enum(['manual', 'imported', 'accepted_suggestion', 'derived']);
-export const ObservationReviewStatus = z.enum(['confirmed', 'corrected']);
+/**
+ * `confirmed` / `corrected` 断言的是**人真的看过这一行**。
+ *
+ * `machine_verified`(m5-02)是第三种、也是唯一诚实描述"AI 提取 + 机器交叉验证"的状态:
+ * 值经过化验单自身的算术冗余校验(百分比求和、WBC×比例、MCV/MCH/MCHC 等式),
+ * 但**没有任何人逐项核对过**,因此 reviewed_by 必须为 null。
+ *
+ * `unverified`:提取出来了,但单据上没有可交叉验算的冗余,机器验不了、也没有人核对过。
+ * `check_failed`:参与的自洽等式没算平 —— 该行(或同一等式里的另一行)很可能读错了。
+ *
+ * 为什么这样分而不是要求用户逐行"接受"(ADR-053/054):让用户对着几十个数字点一次接受
+ * 并不产生验证 —— 一个不熟悉化验单的人无法判断 RDW-SD 39.5 fL 是否正确,
+ * 项目从 29 个减到 5 个也不会变得可判断。而那次点击会把这些值记成"已由某某确认",
+ * 是系统替用户签的假话。**如实记录可信度,比伪造一次确认诚实得多。**
+ */
+export const ObservationReviewStatus = z.enum([
+  'confirmed', 'corrected', 'machine_verified', 'unverified', 'check_failed',
+]);
 export const ObservationMappingStatus = z.enum(['mapped', 'unmapped']);
 export const ObservationAbnormalFlag = z.enum([
   'low', 'high', 'critical_low', 'critical_high', 'abnormal', 'normal', 'unknown',
@@ -331,6 +348,38 @@ export const ObservationSuggestionAcceptResponse = ObservationBatchCreateRespons
   suggestion_id: Uuid,
   accepted_row_ids: z.array(z.string()),
 }).strict();
+
+/**
+ * Stage 2(化验单结构化提取)的**模型输出**契约(M5,最小范围)。
+ *
+ * 刻意只要 5 个字段,而且全是原文转录:模型的职责是"把表格变成行",不是归一。
+ * `ObservationBatchRow` 有 34 个可选字段(concept_code / loinc_code / unit_ucum /
+ * ref_low / ref_high / source_page …),它们各自已有确定性或人工的归一路径 ——
+ * 让模型去猜只会制造需要人工推翻的噪声。缺的字段由 handler 按默认值补齐。
+ *
+ * 行数上限对齐 ObservationSuggestionPayload.rows 的 100。
+ */
+export const Stage2ObservationRow = z
+  .object({
+    /** 项目名原文,如「白细胞(WBC)」 */
+    local_name: z.string().trim().min(1).max(300),
+    /** 结果值原文,保留 `<0.01` / `阴性` 这类写法,不要转成数字 */
+    value_raw: z.string().trim().min(1).max(200),
+    /** 单位原文,如 `10^9/L`;单据上没有就给 null */
+    unit_raw: z.string().trim().max(100).nullable(),
+    /** 参考范围原文,如 `3.50-9.50`;不拆成 low/high,那是确定性代码的活 */
+    ref_text: z.string().trim().max(200).nullable(),
+    /** 异常标记原文,如 `↑` / `H`;单据上没印就给 null,**不要自己判断高低** */
+    abnormal_flag_raw: z.string().trim().max(100).nullable(),
+  })
+  .strict();
+
+export const Stage2ObservationModelOut = z
+  .object({ rows: z.array(Stage2ObservationRow).max(100) })
+  .strict();
+
+export type Stage2ObservationRowT = z.infer<typeof Stage2ObservationRow>;
+export type Stage2ObservationModelOutT = z.infer<typeof Stage2ObservationModelOut>;
 
 const observationPatchShape = {
   document_id: Uuid.nullable().optional(),

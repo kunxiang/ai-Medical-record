@@ -17,6 +17,7 @@ import {
   assertPdfPageLimit, MAX_PDF_BYTES, pdfPageCount, PdfStage1Error,
 } from '../pdf-stage1.js';
 import { scheduleFacilityNormalization } from '../normalization/facility-service.js';
+import { scheduleObservationSuggestion } from '../processing/scheduling.js';
 import type { JobFailure } from './queue.js';
 
 // spec m2-03。S1:分类 + 元数据 + 全文提取。
@@ -255,6 +256,13 @@ export async function handleStage1(documentId: string, suggestionTarget?: {
 
     if (out.facility_name_raw !== null) {
       await scheduleFacilityNormalization(tx, out.facility_name_raw);
+    }
+    // 化验单才有可结构化的结果表(m5-01)。Stage 2 读的是本次刚写好的 S1 工件,
+    // 不重新看图;插件没声明该能力时 schedule 返回 null,Core 行为不受影响。
+    if (out.doc_type === 'lab_report') {
+      await scheduleObservationSuggestion(tx, {
+        documentId, personId: ctx.personId, s1ArtifactKey: artifactKey,
+      });
     }
     if (suggestionTarget) {
       await tx.insert(processingSuggestion).values({
