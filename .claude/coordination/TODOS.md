@@ -19,6 +19,20 @@
   - 做什么：`git add` 上述三处并提交。建议 message: `docs(task): track p5-capture-crop state and the shared TODO list`
   - 注意：`.claude/` 目前不在 `.gitignore` 里，提交前确认该目录下没有本机私有配置（本次只有 `coordination/TODOS.md`）。
 
+- [ ] **#4** `2026-09-05` **P1** · 重新设计文档详情弹窗（信息密度）
+  - origin: 会话内提出 @ 2026-09-03 (claude-code)
+  - context: owner 实测反馈——"数据被套了多层结构，信息密度非常低，操作非常不方便，这个弹窗很长很长。我相信不会有人花时间来看这些内容，最终导致使用率很低"。
+  - 现状：弹窗 → 分区 → 卡片 → 网格 → 字段 四五层嵌套，手机上每行占大半屏。本轮只删掉了建议接受区块（少一段），**布局本身没动**。
+  - ⚠️ 动手前先定产品问题：**用户打开一份报告，最想在三秒内看到什么？** 我的猜测是「哪几个指标异常」+「这是哪家医院哪天的什么检查」，其余全部折叠——但这是 owner 的判断，不该由实现者替定。
+  - 已完成的相关项（不用重做）：弹窗标题不再回退到 `image.jpg`，改用 doc_type · 机构 · 日期；每行带可信度徽章。
+  - link: apps/web/src/features/browse/DocumentDetailDialog.tsx, apps/web/src/features/data/ObservationPanel.tsx
+
+- [ ] **#5** `2026-09-04` **P0** · 提交本轮改动（已部署但未入库）
+  - origin: 会话内提出 @ 2026-09-03 (claude-code)
+  - context: Stage 2 结构化提取、跨行自洽校验、可信度分级（ADR-053/054）、迁移 0019–0021 **全部已部署到 medireco.eckstein.pro 并在真实单据上验证**，但代码只存在于工作区，25 个文件未提交。
+  - ⚠️ 风险：线上跑的代码没有任何版本记录。换机器、清工作区或误操作即不可复现，而数据库已经有三个迁移落地了。
+  - link: docs/adr.md (ADR-052/053/054)
+
 ## Done
 
 - [x] **#1** `2026-08-31 完成` **P1** · 清理测试数据（在上传真实数据之前）
