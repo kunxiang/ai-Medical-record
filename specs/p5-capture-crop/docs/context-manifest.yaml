@@ -1,0 +1,114 @@
+version: 1
+task: p5-capture-crop
+generated_on: "2026-09-01"
+source_commit: "193ce8a1ed884d6f9b02714230ad8a40b7f51199"
+task_document: specs/p5-capture-crop/CLAUDE.md
+required_skill_route: fullstack
+
+source_types:
+  - current_code
+  - current_tests_and_results
+  - design_docs
+  - durable_engineering_wiki
+  - external_vendor_documentation
+
+expanded_paths:
+  - docs/adr.md                       # ADR-050(送模型的是派生物)、ADR-052(存角点不存图)
+  - docs/04-storage-layout.md         # capture.json 2.1 的 pages[].crop 与版本规则
+  - docs/06-ai-pipeline.md            # 裁切在管线中的位置与顺序约束
+  - specs/p0-p4-core/e2e-deployed-2026-08-30.md   # 供应商像素预算实测(本任务的动机)
+  - specs/p0-p4-core/e2e-deployed-2026-08-31-crop.md  # 本任务的部署验收(注:文件位置偏于此目录)
+  - packages/contracts/src/crop.ts
+  - packages/contracts/src/document.ts
+  - packages/contracts/src/sidecars.ts
+  - apps/api/src/derivatives.ts
+  - apps/api/src/jobs/stage1-handler.ts
+  - apps/api/src/routes/documents.ts
+  - apps/api/src/routes/corrections.ts
+  - apps/api/src/routes/browse.ts     # 只读:其中的显式禁令挡住了 M6 自查入口
+  - apps/api/drizzle/0019_p5_page_crop.sql
+  - apps/api/test/derivatives.test.ts
+  - apps/web/src/offline/crop.ts
+  - apps/web/src/offline/crop.test.ts
+  - apps/web/src/offline/capture.ts
+  - apps/web/src/features/capture/CropEditor.tsx
+  - apps/web/src/features/capture/DraftPreviewModal.tsx
+  - apps/web/src/features/capture/DraftGallery.tsx
+  - apps/web/vite.config.ts
+  - tools/src/rebuild-index.ts
+  - infra/docker-compose.medireco.yml
+
+findings:
+  - id: F1
+    claim: >-
+      供应商把每张图归一到固定 384 图像 token,长边 800/1024/2576 的 input_tokens 恒为 2002。
+      像素预算是死的 ⇒ 裁掉背景是唯一还剩的提高每字符像素数的杠杆。
+    evidence: specs/p0-p4-core/e2e-deployed-2026-08-30.md
+  - id: F2
+    claim: >-
+      sharp 0.33.5 只有 affine/extract/rotate/resize/trim;affine 是 2×2 线性矩阵,
+      做不了投影变换 ⇒ 轴对齐裁切零新增依赖,透视矫正强制引第二个图像库。
+    evidence: 对已安装 sharp 的 prototype 实测(2026-08-31)
+  - id: F3
+    claim: >-
+      @techstark/opencv-js@5 的 default 是 thenable,须 await;旧版的
+      onRuntimeInitialized 回调永不触发,失败路径被 catch 吞掉后表现为"检测不到"。
+    evidence: 部署实例浏览器实测;修复见 apps/web/src/offline/crop.ts
+  - id: F4
+    claim: >-
+      检测精度:合成图上四角误差 < 5 px、面积占比误差 0.4%,耗时 54 ms(600×800 降采样)。
+    evidence: specs/p0-p4-core/e2e-deployed-2026-08-31-crop.md
+  - id: F5
+    claim: >-
+      模型输入体积**变大**(19→44 KiB),因为未裁那张多为平坦背景、压缩率高。
+      "裁边顺带缩小跨境回拉体积"的预期不成立;8-30 的体积下降来自 maxEdge 2576→1024。
+    evidence: specs/p0-p4-core/e2e-deployed-2026-08-31-crop.md
+
+  - id: F6
+    claim: >-
+      部署实例于 2026-08-31 全量重置(owner 授权,既有数据确认为纯测试):桶清空 504 个
+      版本/标记、schema 重建、20 个迁移从零重放通过。**副作用:8-30 的 6 份基准单据
+      原件永久删除**,pg_dump 快照只含数据库行不含图像字节。
+    evidence: scratchpad/amr-before-reset-20260831-0624.sql.gz(6 个 short_id 均可检出)
+
+negative_searches:
+  - claim: 仓库内没有可用于对照的真实单据影像
+    evidence: fixtures/README.md 明确"原始影像不入库";fixtures/m1/* 均为合成图
+  - claim: 部署实例中也已没有真实单据可用于对照
+    evidence: 2026-08-31 重置后桶内仅 _meta(9) + _probe(6);person/document 计数均为 0
+  - claim: 没有把 ai 变体开放为浏览端点的现成路由
+    evidence: apps/api/src/routes/browse.ts:204 有显式禁令,只注册 thumb/preview
+
+unknowns:
+  - id: U1
+    question: 真实单据上裁边能否兑现准确率增益(尤其小数点与 10⁹/L 上标)?
+    next_probe: >-
+      **原素材已失效** —— 2026-08-31 的全量重置删除了 8-30 那 6 份单据的 S3 原件。
+      改为:等 owner 上传新的真实单据后,同一份各跑裁 / 不裁多轮,比对姓名、sampled_on、
+      facility 与数值字段;沿用 e2e-deployed-2026-08-30.md 的表格格式。
+      注意采集端默认就会自动裁,取"不裁"对照需在预览里点「本页不裁」,
+      或直接对同一原件调 renderDerivative(source, 'ai', null) 生成对照图。
+  - id: U2
+    question: 对折单据的折痕导致只框半页,发生率多高?有无可靠的自动判据?
+    next_probe: 统计第一批人工调整数据中有折痕单据的改框比例,再决定是否给中线附近强直边降权。
+  - id: U3
+    question: 上传后的自查入口该怎么做?
+    next_probe: >-
+      需 owner 裁决 —— 自然实现是把 ai 变体开放为浏览端点,但 browse.ts:204 有显式禁令。
+      替代方案是只显示"本页裁过"与角点、不给图。
+
+invalidation:
+  - if: 再次全量重置部署实例
+    then: >-
+      先确认基准素材是否只存在于该实例。本任务的 M5 素材就是这样丢的 ——
+      pg_dump 保住了数据库行,保不住 S3 里的图像字节。
+  - if: 更换模型供应商
+    then: >-
+      DERIVATIVE_SPEC.ai 的 maxEdge 与本任务的收益假设(F1)都必须重测,
+      不得沿用;注释已在 apps/api/src/derivatives.ts 标注。
+  - if: 开放事后修改裁切(correction-NNNN.json 追加 crop_adjust)
+    then: >-
+      ensureDerivative 的 key 不编码 crop,会成为陈旧缓存;
+      必须改为删除既有派生物或把 crop 摘要并入 key。
+  - if: 升级或替换 @techstark/opencv-js
+    then: 重新确认初始化契约(F3);crop.ts 的注释已写明不要退回 onRuntimeInitialized 写法。
